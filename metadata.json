@@ -1,0 +1,6 @@
+{
+  "name": "Gestor de POIs - Mis Viajes",
+  "description": "Gestor moderno de Puntos de Interés (POIs) sincronizado con Google Sheets, con mapa interactivo, filtros avanzados y campos detallados.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
