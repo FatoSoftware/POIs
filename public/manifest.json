@@ -1,0 +1,58 @@
+{
+  "name": "Mis Puntos de Interés",
+  "short_name": "POIs Viajes",
+  "description": "Gestor y explorador de Puntos de Interés sincronizado con Google Sheets, mapas interactivos y navegación GPS.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "orientation": "portrait-primary",
+  "background_color": "#0f172a",
+  "theme_color": "#0d9488",
+  "categories": ["travel", "navigation", "utilities", "lifestyle"],
+  "lang": "es",
+  "dir": "ltr",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "maskable any"
+    },
+    {
+      "src": "/favicon.svg",
+      "sizes": "48x48 96x96",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Nuevo Lugar",
+      "short_name": "Nuevo POI",
+      "description": "Añadir un nuevo punto de interés",
+      "url": "/?action=create",
+      "icons": [{ "src": "/icon.svg", "sizes": "any" }]
+    },
+    {
+      "name": "Ver Mapa",
+      "short_name": "Mapa",
+      "description": "Abrir vista de mapa interactivo",
+      "url": "/?view=map",
+      "icons": [{ "src": "/icon.svg", "sizes": "any" }]
+    },
+    {
+      "name": "Ver Tarjetas",
+      "short_name": "Tarjetas",
+      "description": "Abrir catálogo de tarjetas",
+      "url": "/?view=grid",
+      "icons": [{ "src": "/icon.svg", "sizes": "any" }]
+    }
+  ]
+}

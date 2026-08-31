@@ -191,10 +191,11 @@ export const Navbar: React.FC<NavbarProps> = ({
             <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin text-teal-600' : ''}`} />
           </button>
 
+          {/* Settings & Apps Script (Hidden on mobile for safety - only desktop) */}
           <button
             onClick={onOpenSettings}
-            className="p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:text-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 active:scale-95 border border-slate-200 dark:border-slate-700 transition-all min-w-[40px] min-h-[40px] flex items-center justify-center cursor-pointer"
-            title="Ajustes y Apps Script"
+            className="hidden md:flex p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:text-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 active:scale-95 border border-slate-200 dark:border-slate-700 transition-all min-w-[40px] min-h-[40px] items-center justify-center cursor-pointer"
+            title="Ajustes y Apps Script (Versión de escritorio)"
           >
             <Settings className="w-4 h-4" />
           </button>

@@ -19,6 +19,7 @@ import { NavigationModal } from './components/NavigationModal';
 import { ThemeSelectorModal } from './components/ThemeSelectorModal';
 import { CategoryManagerModal } from './components/CategoryManagerModal';
 import { MobileBottomNav } from './components/MobileBottomNav';
+import { PWAInstallBanner } from './components/PWAInstallBanner';
 import { BrandIcon } from './components/BrandIcon';
 import { CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
 
@@ -646,6 +647,9 @@ export default function App() {
         onResetCategories={handleResetCategories}
         pois={pois}
       />
+
+      {/* 8. PWA Install Prompt Banner for Mobile / Standalone setup */}
+      <PWAInstallBanner />
     </div>
   );
 }

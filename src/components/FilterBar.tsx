@@ -14,6 +14,9 @@ import {
   Navigation,
   Tag,
   Plus,
+  Map,
+  Columns,
+  LayoutGrid,
 } from 'lucide-react';
 
 interface FilterBarProps {
@@ -68,7 +71,49 @@ export const FilterBar: React.FC<FilterBarProps> = ({
   };
 
   return (
-    <div className="bg-white dark:bg-slate-900 border-b border-slate-200/80 dark:border-slate-800 px-3 sm:px-6 py-2.5 space-y-2.5 transition-colors">
+    <div className="bg-white dark:bg-slate-900 border-b border-slate-200/80 dark:border-slate-800 px-3 sm:px-6 py-2 sm:py-2.5 space-y-2 sm:space-y-2.5 transition-colors">
+      {/* Mobile View Switcher (Segmented Control for Mapa / Pantalla dividida / Tarjetas) */}
+      <div className="flex md:hidden items-center justify-between bg-slate-100 dark:bg-slate-800/90 p-1 rounded-xl border border-slate-200/80 dark:border-slate-700/80 w-full">
+        <button
+          type="button"
+          onClick={() => setViewMode('map')}
+          className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+            viewMode === 'map'
+              ? 'bg-white dark:bg-slate-700 text-teal-700 dark:text-teal-300 shadow-xs'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+          }`}
+          title="Vista solo mapa"
+        >
+          <Map className="w-3.5 h-3.5" />
+          <span>Mapa</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setViewMode('split')}
+          className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+            viewMode === 'split'
+              ? 'bg-white dark:bg-slate-700 text-teal-700 dark:text-teal-300 shadow-xs'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+          }`}
+          title="Pantalla dividida (Mapa + Tarjetas)"
+        >
+          <Columns className="w-3.5 h-3.5" />
+          <span>Dividida</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setViewMode('grid')}
+          className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+            viewMode === 'grid'
+              ? 'bg-white dark:bg-slate-700 text-teal-700 dark:text-teal-300 shadow-xs'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+          }`}
+          title="Vista solo tarjetas / catálogo"
+        >
+          <LayoutGrid className="w-3.5 h-3.5" />
+          <span>Tarjetas</span>
+        </button>
+      </div>
       {/* Top row: Search input, City dropdown, Quick Status, Advanced toggle */}
       <div className="flex flex-wrap items-center gap-2">
         {/* Search Bar */}
