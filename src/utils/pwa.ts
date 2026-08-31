@@ -3,13 +3,18 @@
 export function registerServiceWorker() {
   if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
     window.addEventListener('load', () => {
+      // Calculate SW path relative to current base URL (GitHub Pages subpaths compatible)
+      const currentUrl = window.location.href.split('?')[0].split('#')[0];
+      const basePath = currentUrl.endsWith('/') ? currentUrl : currentUrl.substring(0, currentUrl.lastIndexOf('/') + 1);
+      const swUrl = `${basePath}sw.js`;
+
       navigator.serviceWorker
-        .register('/sw.js')
+        .register(swUrl)
         .then((registration) => {
           console.log('[PWA] Service Worker registered with scope:', registration.scope);
         })
         .catch((error) => {
-          console.warn('[PWA] Service Worker registration failed:', error);
+          console.warn('[PWA] Service Worker registration error:', error);
         });
     });
   }

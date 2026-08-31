@@ -1,27 +1,28 @@
 // Service Worker for Mis Puntos de Interés PWA
-const CACHE_NAME = 'pois-app-v1.0.0';
+const CACHE_NAME = 'pois-app-v1.0.1';
+
 const STATIC_ASSETS = [
-  '/',
-  '/index.html',
-  '/manifest.json',
-  '/icon.svg',
-  '/favicon.svg',
+  './',
+  './index.html',
+  './manifest.json',
+  './icon.svg',
+  './favicon.svg',
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
   'https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Outfit:wght@500;600;700;800&display=swap'
 ];
 
-// Install Event: cache static shell assets
+// Install Event: cache static shell assets relative to SW location
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
       return cache.addAll(STATIC_ASSETS).catch((err) => {
-        console.warn('[SW] Non-critical cache asset failed:', err);
+        console.warn('[SW] Non-critical cache asset preload failed:', err);
       });
     }).then(() => self.skipWaiting())
   );
 });
 
-// Activate Event: clear obsolete caches
+// Activate Event: clean up older caches and claim clients immediately
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((cacheNames) => {
@@ -34,17 +35,14 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Fetch Event: Smart caching strategy
+// Fetch Event: Smart offline caching strategy
 self.addEventListener('fetch', (event) => {
   const { request } = event;
+  if (request.method !== 'GET') return;
+
   const url = new URL(request.url);
 
-  // Skip non-GET requests
-  if (request.method !== 'GET') {
-    return;
-  }
-
-  // Map Tiles & Static CDN Assets (Stale-While-Revalidate)
+  // 1. External Map Tiles & Fonts (Stale While Revalidate)
   if (
     url.hostname.includes('tile.openstreetmap.org') ||
     url.hostname.includes('basemaps.cartocdn.com') ||
@@ -70,7 +68,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // App Shell & Local Navigation: Network First with Cache Fallback
+  // 2. App Shell & Dynamic Assets (Network First with Cache Fallback)
   event.respondWith(
     fetch(request)
       .then((networkResponse) => {
@@ -87,11 +85,18 @@ self.addEventListener('fetch', (event) => {
         if (cachedResponse) {
           return cachedResponse;
         }
-        // Fallback to index.html for navigation requests
+
+        // Fallback for HTML navigation within the app's scope
         if (request.mode === 'navigate') {
-          return caches.match('/index.html') || caches.match('/');
+          const fallbackIndex = (await caches.match('./index.html')) || (await caches.match('./'));
+          if (fallbackIndex) return fallbackIndex;
         }
-        return new Response('Offline', { status: 503, statusText: 'Offline' });
+
+        return new Response('Modo fuera de línea', {
+          status: 503,
+          statusText: 'Offline',
+          headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+        });
       })
   );
 });
