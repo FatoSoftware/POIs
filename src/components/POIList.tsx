@@ -1,6 +1,6 @@
 import React from 'react';
-import { POI, GPSLocation, AppTheme } from '../types';
-import { CATEGORIES_CONFIG } from '../constants';
+import { POI, GPSLocation, AppTheme, CategoryMeta } from '../types';
+import { getCategoryMeta } from '../utils/categories';
 import { formatDistance, calculateHaversineDistance } from '../utils/geo';
 import {
   MapPin,
@@ -26,6 +26,7 @@ interface POIListProps {
   onClearFilters?: () => void;
   hasActiveFilters?: boolean;
   currentTheme?: AppTheme;
+  categories?: Record<string, CategoryMeta>;
 }
 
 export const POIList: React.FC<POIListProps> = ({
@@ -41,6 +42,7 @@ export const POIList: React.FC<POIListProps> = ({
   onClearFilters,
   hasActiveFilters,
   currentTheme = 'moderno',
+  categories,
 }) => {
   if (pois.length === 0) {
     return (
@@ -80,7 +82,7 @@ export const POIList: React.FC<POIListProps> = ({
   return (
     <div className="h-full overflow-y-auto p-2.5 sm:p-4 space-y-2.5 sm:space-y-3">
       {pois.map((poi) => {
-        const catMeta = CATEGORIES_CONFIG[poi.categoria] || CATEGORIES_CONFIG.Otro;
+        const catMeta = getCategoryMeta(poi.categoria, categories);
         const isSelected = selectedPoi?.id === poi.id;
 
         const distanceStr =

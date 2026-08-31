@@ -1,6 +1,6 @@
 import React from 'react';
-import { POI, GPSLocation } from '../types';
-import { CATEGORIES_CONFIG } from '../constants';
+import { POI, GPSLocation, CategoryMeta } from '../types';
+import { getCategoryMeta } from '../utils/categories';
 import { formatDistance, calculateHaversineDistance } from '../utils/geo';
 import {
   X,
@@ -29,6 +29,7 @@ interface POIDetailModalProps {
   onToggleFavorite: (poi: POI) => void;
   onNavigate?: (poi: POI) => void;
   userLocation?: GPSLocation | null;
+  categories?: Record<string, CategoryMeta>;
 }
 
 export const POIDetailModal: React.FC<POIDetailModalProps> = ({
@@ -39,12 +40,13 @@ export const POIDetailModal: React.FC<POIDetailModalProps> = ({
   onToggleFavorite,
   onNavigate,
   userLocation,
+  categories,
 }) => {
   const [copiedCoords, setCopiedCoords] = React.useState(false);
 
   if (!poi) return null;
 
-  const catMeta = CATEGORIES_CONFIG[poi.categoria] || CATEGORIES_CONFIG.Otro;
+  const catMeta = getCategoryMeta(poi.categoria, categories);
 
   const distanceText =
     userLocation && typeof poi.lat === 'number' && typeof poi.lng === 'number'

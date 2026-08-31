@@ -11,6 +11,7 @@ import {
   Columns,
   Palette,
   Check,
+  Tag,
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -20,6 +21,7 @@ interface NavbarProps {
   onRefresh: () => void;
   onOpenCreate: () => void;
   onOpenSettings: () => void;
+  onOpenCategoryManager: () => void;
   viewMode: 'map' | 'split' | 'grid';
   setViewMode: (mode: 'map' | 'split' | 'grid') => void;
   syncSource: 'live' | 'cache';
@@ -34,6 +36,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onRefresh,
   onOpenCreate,
   onOpenSettings,
+  onOpenCategoryManager,
   viewMode,
   setViewMode,
   syncSource,
@@ -125,8 +128,18 @@ export const Navbar: React.FC<NavbarProps> = ({
           </button>
         </div>
 
-        {/* Right Actions: Theme, Refresh, Settings, New */}
+        {/* Right Actions: Categories, Theme, Refresh, Settings, New */}
         <div className="flex items-center gap-1.5 sm:gap-2">
+          {/* Categories Button */}
+          <button
+            onClick={onOpenCategoryManager}
+            className="p-2 sm:px-2.5 sm:py-2 rounded-xl text-slate-700 dark:text-slate-200 hover:bg-teal-50 dark:hover:bg-teal-950/40 hover:text-teal-700 dark:hover:text-teal-300 hover:border-teal-300 dark:hover:border-teal-700 active:scale-95 border border-slate-200 dark:border-slate-700 transition-all flex items-center gap-1.5 cursor-pointer min-w-[40px] min-h-[40px] justify-center"
+            title="Gestionar Categorías (Añadir, Editar colores e iconos, Eliminar)"
+          >
+            <Tag className="w-4 h-4 text-teal-600 dark:text-teal-400" />
+            <span className="hidden xl:inline text-xs font-bold">Categorías</span>
+          </button>
+
           {/* Theme Switcher dropdown button */}
           <div className="relative">
             <button

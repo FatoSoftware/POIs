@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { POI, POICategory, PriceLevel, VisitStatus } from '../types';
-import { CATEGORIES_CONFIG, POPULAR_TAGS } from '../constants';
+import { POI, POICategory, PriceLevel, VisitStatus, CategoryMeta } from '../types';
+import { POPULAR_TAGS } from '../constants';
+import { getCategoryMeta } from '../utils/categories';
 import { reverseGeocode } from '../services/api';
 import {
   X,
@@ -19,6 +20,7 @@ import {
   Check,
   AlertCircle,
   Compass,
+  Plus,
 } from 'lucide-react';
 
 interface POIFormModalProps {
@@ -28,6 +30,8 @@ interface POIFormModalProps {
   onDelete?: (poi: POI) => void;
   initialPOI?: Partial<POI> | null;
   existingCities?: string[];
+  categories?: Record<string, CategoryMeta>;
+  onOpenCategoryManager?: () => void;
 }
 
 export const POIFormModal: React.FC<POIFormModalProps> = ({
@@ -37,6 +41,8 @@ export const POIFormModal: React.FC<POIFormModalProps> = ({
   onDelete,
   initialPOI,
   existingCities = [],
+  categories,
+  onOpenCategoryManager,
 }) => {
   const isEdit = Boolean(initialPOI?.id);
 
@@ -331,24 +337,37 @@ export const POIFormModal: React.FC<POIFormModalProps> = ({
 
               {/* Category Selector */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                  Categoría Principal
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {Object.entries(CATEGORIES_CONFIG).map(([key, config]) => {
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                    Categoría Principal
+                  </label>
+                  {onOpenCategoryManager && (
+                    <button
+                      type="button"
+                      onClick={onOpenCategoryManager}
+                      className="text-xs text-teal-600 hover:text-teal-700 font-semibold flex items-center gap-1 cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Gestionar / Añadir</span>
+                    </button>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-48 overflow-y-auto p-1 border border-slate-200 rounded-xl">
+                  {Object.entries(categories || {}).map(([key, config]) => {
                     const isSelected = categoria === key;
+                    const meta = getCategoryMeta(key, categories);
                     return (
                       <button
                         key={key}
                         type="button"
-                        onClick={() => setCategoria(key as POICategory)}
-                        className={`p-2.5 rounded-xl border text-left flex items-center gap-2 transition-all cursor-pointer ${
+                        onClick={() => setCategoria(key)}
+                        className={`p-2 rounded-xl border text-left flex items-center gap-2 transition-all cursor-pointer ${
                           isSelected
-                            ? 'border-teal-500 bg-teal-50 text-teal-900 ring-2 ring-teal-500/20 shadow-xs font-semibold'
+                            ? 'border-teal-500 bg-teal-50 text-teal-950 ring-2 ring-teal-500/20 shadow-xs font-bold'
                             : 'border-slate-200 bg-white hover:bg-slate-50 text-slate-700'
                         }`}
                       >
-                        <span className="text-lg">{config.icon}</span>
+                        <span className="text-base">{meta.icon || '📌'}</span>
                         <span className="text-xs truncate">{key}</span>
                       </button>
                     );

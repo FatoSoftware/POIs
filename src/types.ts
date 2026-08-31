@@ -1,5 +1,8 @@
 export type POICategory =
   | 'Comida'
+  | 'Restaurante'
+  | 'Copas'
+  | 'Hotel'
   | 'Turismo'
   | 'Ocio'
   | 'Alojamiento'
@@ -7,7 +10,8 @@ export type POICategory =
   | 'Cultura'
   | 'Compras'
   | 'Transporte'
-  | 'Otro';
+  | 'Otro'
+  | string;
 
 export type Category = POICategory;
 
@@ -72,11 +76,13 @@ export interface FilterState {
 }
 
 export interface CategoryMeta {
+  id?: string;
   label: string;
   icon: string;
   color: string;
-  bgLight: string;
-  borderColor: string;
+  bgLight?: string;
+  borderColor?: string;
+  isCustom?: boolean;
 }
 
 export interface AppThemeConfig {

@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
-import { POI, GPSLocation, AppTheme } from '../types';
-import { CATEGORIES_CONFIG, MAP_TILE_PROVIDERS, APP_THEMES } from '../constants';
+import { POI, GPSLocation, AppTheme, CategoryMeta } from '../types';
+import { MAP_TILE_PROVIDERS, APP_THEMES } from '../constants';
+import { getCategoryMeta } from '../utils/categories';
 import {
   Navigation,
   Layers,
@@ -29,6 +30,7 @@ interface MapViewProps {
   isLocatingGPS?: boolean;
   routePoi?: POI | null;
   onClearRoute?: () => void;
+  categories?: Record<string, CategoryMeta>;
 }
 
 export const MapView: React.FC<MapViewProps> = ({
@@ -44,6 +46,7 @@ export const MapView: React.FC<MapViewProps> = ({
   isLocatingGPS = false,
   routePoi,
   onClearRoute,
+  categories,
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
@@ -223,7 +226,7 @@ export const MapView: React.FC<MapViewProps> = ({
         return;
       }
 
-      const catMeta = CATEGORIES_CONFIG[poi.categoria] || CATEGORIES_CONFIG.Otro;
+      const catMeta = getCategoryMeta(poi.categoria, categories);
       const isSelected = selectedPoi?.id === poi.id;
       const isRouteDest = routePoi?.id === poi.id;
       const hasRating = poi.rating !== undefined && poi.rating > 0;
@@ -358,7 +361,7 @@ export const MapView: React.FC<MapViewProps> = ({
         }
       });
     });
-  }, [pois, selectedPoi, routePoi]);
+  }, [pois, selectedPoi, routePoi, categories]);
 
   // Center on selected POI if changed
   useEffect(() => {

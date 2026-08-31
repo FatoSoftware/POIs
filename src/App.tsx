@@ -1,7 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { POI, FilterState, AppTheme, GPSLocation } from './types';
+import { POI, FilterState, AppTheme, GPSLocation, CategoryMeta } from './types';
 import { fetchPOIsFromSheet, savePOIToSheet, deletePOIFromSheet } from './services/api';
 import { calculateHaversineDistance } from './utils/geo';
+import {
+  getStoredCategories,
+  saveStoredCategories,
+  INITIAL_CATEGORIES_CONFIG,
+} from './utils/categories';
 import { Navbar } from './components/Navbar';
 import { FilterBar } from './components/FilterBar';
 import { MapView } from './components/MapView';
@@ -12,6 +17,7 @@ import { DeleteConfirmModal } from './components/DeleteConfirmModal';
 import { SettingsModal } from './components/SettingsModal';
 import { NavigationModal } from './components/NavigationModal';
 import { ThemeSelectorModal } from './components/ThemeSelectorModal';
+import { CategoryManagerModal } from './components/CategoryManagerModal';
 import { MobileBottomNav } from './components/MobileBottomNav';
 import { BrandIcon } from './components/BrandIcon';
 import { CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
@@ -26,6 +32,12 @@ export default function App() {
     type: 'success' | 'info' | 'error';
     text: string;
   } | null>(null);
+
+  // Category State (Dynamic CRUD)
+  const [categories, setCategories] = useState<Record<string, CategoryMeta>>(() => {
+    return getStoredCategories();
+  });
+  const [categoryModalOpen, setCategoryModalOpen] = useState(false);
 
   // View & UI State
   const [viewMode, setViewMode] = useState<'map' | 'split' | 'grid'>('split');
@@ -297,6 +309,78 @@ export default function App() {
     }
   };
 
+  // Category Action Handlers
+  const handleSaveCategory = (
+    oldKey: string | null,
+    newKey: string,
+    meta: CategoryMeta
+  ) => {
+    const updated = { ...categories };
+    if (oldKey && oldKey !== newKey) {
+      delete updated[oldKey];
+      // Cascading update to all POIs that had the old category name
+      setPois((prev) =>
+        prev.map((p) => {
+          if (p.categoria === oldKey) {
+            const updatedPoi = { ...p, categoria: newKey };
+            // Save updated POI to backend in background
+            savePOIToSheet(updatedPoi, true).catch(() => {});
+            return updatedPoi;
+          }
+          return p;
+        })
+      );
+      // Also update selectedPoi or detailModalPoi if matching
+      if (selectedPoi?.categoria === oldKey) {
+        setSelectedPoi((prev) => (prev ? { ...prev, categoria: newKey } : null));
+      }
+      if (detailModalPoi?.categoria === oldKey) {
+        setDetailModalPoi((prev) => (prev ? { ...prev, categoria: newKey } : null));
+      }
+    }
+    updated[newKey] = meta;
+    setCategories(updated);
+    saveStoredCategories(updated);
+    showToast(`Categoría "${newKey}" guardada con éxito.`);
+  };
+
+  const handleDeleteCategory = (key: string, reassignToKey?: string) => {
+    const targetKey = reassignToKey || 'Otro';
+    // Reassign affected POIs
+    setPois((prev) =>
+      prev.map((p) => {
+        if (p.categoria === key) {
+          const updatedPoi = { ...p, categoria: targetKey };
+          savePOIToSheet(updatedPoi, true).catch(() => {});
+          return updatedPoi;
+        }
+        return p;
+      })
+    );
+    if (selectedPoi?.categoria === key) {
+      setSelectedPoi((prev) => (prev ? { ...prev, categoria: targetKey } : null));
+    }
+    if (detailModalPoi?.categoria === key) {
+      setDetailModalPoi((prev) => (prev ? { ...prev, categoria: targetKey } : null));
+    }
+
+    const updated = { ...categories };
+    delete updated[key];
+    if (Object.keys(updated).length === 0) {
+      updated.Otro = INITIAL_CATEGORIES_CONFIG.Otro;
+    }
+    setCategories(updated);
+    saveStoredCategories(updated);
+    showToast(`Categoría "${key}" eliminada.`);
+  };
+
+  const handleResetCategories = () => {
+    const reset = { ...INITIAL_CATEGORIES_CONFIG };
+    setCategories(reset);
+    saveStoredCategories(reset);
+    showToast('Categorías restablecidas a los valores por defecto.');
+  };
+
   // Initial Splash Screen while loading
   if (isLoading) {
     return (
@@ -328,6 +412,7 @@ export default function App() {
         onRefresh={() => loadData(false)}
         onOpenCreate={() => handleOpenCreate()}
         onOpenSettings={() => setSettingsModalOpen(true)}
+        onOpenCategoryManager={() => setCategoryModalOpen(true)}
         viewMode={viewMode}
         setViewMode={setViewMode}
         syncSource={syncSource}
@@ -357,6 +442,8 @@ export default function App() {
         viewMode={viewMode}
         setViewMode={setViewMode}
         hasUserLocation={Boolean(userLocation)}
+        categories={categories}
+        onOpenCategoryManager={() => setCategoryModalOpen(true)}
       />
 
       {/* Main Content Area: Responsive Mobile First Layout & Balanced Split */}
@@ -388,6 +475,7 @@ export default function App() {
             isLocatingGPS={isLocatingGPS}
             routePoi={routePoi}
             onClearRoute={() => setRoutePoi(null)}
+            categories={categories}
           />
         </div>
 
@@ -416,6 +504,7 @@ export default function App() {
             onNavigatePoi={handleStartNavigation}
             userLocation={userLocation}
             currentTheme={currentTheme}
+            categories={categories}
             onClearFilters={() =>
               setFilters({
                 search: '',
@@ -488,6 +577,7 @@ export default function App() {
           handleStartNavigation(poi);
         }}
         userLocation={userLocation}
+        categories={categories}
       />
 
       {/* 2. Create / Edit Form Modal */}
@@ -504,6 +594,8 @@ export default function App() {
         }}
         initialPOI={formInitialPOI}
         existingCities={cities}
+        categories={categories}
+        onOpenCategoryManager={() => setCategoryModalOpen(true)}
       />
 
       {/* 3. Delete Confirmation Dialog */}
@@ -542,6 +634,17 @@ export default function App() {
         onClose={() => setThemeModalOpen(false)}
         currentTheme={currentTheme}
         onSelectTheme={setCurrentTheme}
+      />
+
+      {/* 7. Category Manager Modal */}
+      <CategoryManagerModal
+        isOpen={categoryModalOpen}
+        onClose={() => setCategoryModalOpen(false)}
+        categories={categories}
+        onSaveCategory={handleSaveCategory}
+        onDeleteCategory={handleDeleteCategory}
+        onResetCategories={handleResetCategories}
+        pois={pois}
       />
     </div>
   );

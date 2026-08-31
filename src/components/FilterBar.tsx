@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { FilterState, Category } from '../types';
-import { ALL_CATEGORIES, CATEGORIES_CONFIG, STATUS_OPTIONS } from '../constants';
+import { FilterState, Category, CategoryMeta } from '../types';
+import { STATUS_OPTIONS } from '../constants';
+import { getCategoryMeta } from '../utils/categories';
 import {
   Search,
   SlidersHorizontal,
@@ -11,6 +12,8 @@ import {
   ArrowUpDown,
   Filter,
   Navigation,
+  Tag,
+  Plus,
 } from 'lucide-react';
 
 interface FilterBarProps {
@@ -23,6 +26,8 @@ interface FilterBarProps {
   viewMode: 'map' | 'split' | 'grid';
   setViewMode: (mode: 'map' | 'split' | 'grid') => void;
   hasUserLocation?: boolean;
+  categories?: Record<string, CategoryMeta>;
+  onOpenCategoryManager?: () => void;
 }
 
 export const FilterBar: React.FC<FilterBarProps> = ({
@@ -35,6 +40,8 @@ export const FilterBar: React.FC<FilterBarProps> = ({
   viewMode,
   setViewMode,
   hasUserLocation,
+  categories,
+  onOpenCategoryManager,
 }) => {
   const [showAdvanced, setShowAdvanced] = useState(false);
 
@@ -46,6 +53,8 @@ export const FilterBar: React.FC<FilterBarProps> = ({
     filters.soloFavoritos ||
     filters.soloVisitados !== null ||
     filters.minRating > 0;
+
+  const categoryKeys = categories ? Object.keys(categories) : [];
 
   const toggleCategory = (cat: Category) => {
     setFilters((prev) => {
@@ -179,9 +188,9 @@ export const FilterBar: React.FC<FilterBarProps> = ({
           Todos ({totalCount})
         </button>
 
-        {ALL_CATEGORIES.map((cat) => {
+        {categoryKeys.map((cat) => {
           const isSelected = filters.categorias.includes(cat);
-          const meta = CATEGORIES_CONFIG[cat];
+          const meta = getCategoryMeta(cat, categories);
           return (
             <button
               key={cat}
@@ -197,6 +206,17 @@ export const FilterBar: React.FC<FilterBarProps> = ({
             </button>
           );
         })}
+
+        {onOpenCategoryManager && (
+          <button
+            onClick={onOpenCategoryManager}
+            className="px-2.5 py-1.5 rounded-xl font-medium whitespace-nowrap transition-all flex items-center gap-1 cursor-pointer shrink-0 border border-dashed border-teal-300 dark:border-teal-700 text-teal-700 dark:text-teal-400 bg-teal-50/50 dark:bg-teal-950/30 hover:bg-teal-100 dark:hover:bg-teal-900/50"
+            title="Gestionar o añadir categorías"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>Categorías</span>
+          </button>
+        )}
       </div>
 
       {/* Advanced Filter Drawer / Section */}
