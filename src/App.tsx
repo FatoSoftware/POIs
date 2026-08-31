@@ -35,6 +35,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncSource, setSyncSource] = useState<'live' | 'cache'>('cache');
+  const [pendingCount, setPendingCount] = useState<number>(() => getPendingSyncCount());
   const [toastMessage, setToastMessage] = useState<{
     type: 'success' | 'info' | 'error';
     text: string;
@@ -105,6 +106,7 @@ export default function App() {
       const res = await fetchPOIsFromSheet();
       setPois(res.pois);
       setSyncSource(res.source);
+      setPendingCount(res.pendingCount);
       if (res.source === 'live') {
         if (!silent) {
           if (res.pendingCount > 0) {
@@ -124,15 +126,57 @@ export default function App() {
     }
   }, []);
 
+  const handleSyncPending = useCallback(async () => {
+    setIsSyncing(true);
+    try {
+      const res = await syncPendingQueue();
+      setPendingCount(res.remainingCount);
+      if (res.remainingCount === 0) {
+        showToast(`¡Sincronización completa! Se subieron ${res.syncedCount} cambios a Sheets.`, 'success');
+      } else {
+        showToast(`Sincronizados ${res.syncedCount} cambios. Quedan ${res.remainingCount} pendientes.`, 'info');
+      }
+      loadData(true);
+    } catch {
+      showToast('Error al conectar con Google Sheets.', 'error');
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [loadData]);
+
   useEffect(() => {
     loadData();
+
+    // Periodic check to sync any pending changes in background
+    const interval = setInterval(() => {
+      const pending = getPendingSyncCount();
+      setPendingCount(pending);
+      if (pending > 0 && navigator.onLine) {
+        syncPendingQueue().then((res) => {
+          setPendingCount(res.remainingCount);
+        });
+      }
+    }, 20000);
 
     const handleOnline = () => {
       showToast('Conexión reestablecida. Sincronizando...', 'info');
       loadData(true);
     };
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        loadData(true);
+      }
+    };
+
     window.addEventListener('online', handleOnline);
-    return () => window.removeEventListener('online', handleOnline);
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('online', handleOnline);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
   }, [loadData]);
 
   // Request high-accuracy GPS
@@ -245,6 +289,7 @@ export default function App() {
   const handleSavePOI = async (poi: POI, isEdit: boolean) => {
     const res = await savePOIToSheet(poi, isEdit);
     const updatedPoi = { ...poi, id: res.id || poi.id };
+    setPendingCount(getPendingSyncCount());
 
     if (isEdit) {
       setPois((prev) => prev.map((p) => (p.id === updatedPoi.id ? updatedPoi : p)));
@@ -273,6 +318,7 @@ export default function App() {
     setIsDeleting(true);
     try {
       await deletePOIFromSheet(deletingPoi.id);
+      setPendingCount(getPendingSyncCount());
       setPois((prev) => prev.filter((p) => p.id !== deletingPoi.id));
       if (detailModalPoi?.id === deletingPoi.id) {
         setDetailModalPoi(null);
@@ -301,6 +347,7 @@ export default function App() {
       setDetailModalPoi(updated);
     }
     await savePOIToSheet(updated, true);
+    setPendingCount(getPendingSyncCount());
     showToast(
       newFav ? `Añadido a favoritos: ${poi.nombre}` : `Eliminado de favoritos: ${poi.nombre}`,
       'info'
@@ -445,6 +492,8 @@ export default function App() {
         syncSource={syncSource}
         currentTheme={currentTheme}
         onSelectTheme={setCurrentTheme}
+        pendingCount={pendingCount}
+        onSyncPending={handleSyncPending}
       />
 
       {/* Filter and Search Bar */}

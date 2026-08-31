@@ -4,11 +4,13 @@ import { DEFAULT_SCRIPT_URL, INITIAL_POIS_SAMPLE } from '../constants';
 const STORAGE_KEYS = {
   SCRIPT_URL: 'pois_app_script_url',
   POIS_CACHE: 'pois_app_cached_data',
-  LAST_SYNC: 'pois_app_last_sync',
+  CATEGORIES: 'pois_app_categories',
+  DELETED_CATEGORIES: 'pois_app_deleted_categories',
+  LAST_SYNC: 'pois_app_last_sync_timestamp',
   LOCAL_EXTENSIONS: 'pois_app_local_extensions',
-  PENDING_SYNC: 'pois_app_pending_sync_queue',
   LOCAL_CUSTOM: 'pois_app_local_custom_records',
   DELETED_IDS: 'pois_app_deleted_ids',
+  PENDING_SYNC: 'pois_app_pending_sync_queue',
 };
 
 export interface PendingSyncItem {
@@ -47,7 +49,7 @@ export function saveLocalExtensionsMap(map: Record<string, Partial<POI>>): void 
   try {
     localStorage.setItem(STORAGE_KEYS.LOCAL_EXTENSIONS, JSON.stringify(map));
   } catch (e) {
-    console.error('Failed to save local extensions in localStorage', e);
+    console.error('Failed to save local extensions', e);
   }
 }
 
@@ -138,15 +140,48 @@ export function getLastSyncTime(): string | null {
 
 /**
  * Universal Multi-Transport dispatcher for Google Apps Script
- * Tries POST (text/plain) first, then falls back to GET query parameters.
- * This guarantees delivery even if POST or CORS redirects fail on mobile browsers.
+ * Priority 1: Full-stack Express server proxy (/api/sheets/*) - completely avoids CORS and mobile redirect issues
+ * Priority 2: Direct browser POST (text/plain)
+ * Priority 3: Direct browser GET with query params
  */
 async function sendPayloadToScript(url: string, payload: any): Promise<{ success: boolean; data?: any; error?: string }> {
-  // Method 1: Try POST with text/plain body
+  // Method 1: Try Full-stack Server-side Proxy
+  try {
+    let endpoint = '/api/sheets/save-poi';
+    let bodyData: any = { targetUrl: url, poi: payload, isEdit: payload.action === 'update' };
+
+    if (payload.action === 'delete') {
+      endpoint = '/api/sheets/delete-poi';
+      bodyData = { targetUrl: url, id: payload.id };
+    } else if (payload.action === 'batch_sync') {
+      endpoint = '/api/sheets/batch-sync';
+      bodyData = { targetUrl: url, pois: payload.pois };
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 12000);
+
+    const proxyRes = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(bodyData),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    if (proxyRes.ok) {
+      const data = await proxyRes.json();
+      return { success: true, data };
+    }
+  } catch (proxyErr) {
+    console.warn('Server proxy unavailable, falling back to direct browser transport:', proxyErr);
+  }
+
+  // Method 2: Direct POST with text/plain (avoids CORS preflight)
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000);
-    
+    const timeout = setTimeout(() => controller.abort(), 12000);
+
     const postRes = await fetch(url, {
       method: 'POST',
       body: JSON.stringify(payload),
@@ -161,19 +196,16 @@ async function sendPayloadToScript(url: string, payload: any): Promise<{ success
     if (postRes.ok) {
       try {
         const json = await postRes.json();
-        if (json && (json.status === 'success' || json.id || Array.isArray(json))) {
-          return { success: true, data: json };
-        }
+        return { success: true, data: json };
       } catch {
-        // If response is text / HTML redirect
         return { success: true };
       }
     }
   } catch (postErr) {
-    console.warn('POST method failed, trying GET fallback parameter method...', postErr);
+    console.warn('Direct POST failed, trying GET fallback parameter method...', postErr);
   }
 
-  // Method 2: GET with encoded parameters (100% reliable on Google Apps Script Web Apps without CORS blockage)
+  // Method 3: GET with encoded parameters
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 12000);
@@ -200,7 +232,7 @@ async function sendPayloadToScript(url: string, payload: any): Promise<{ success
     return { success: false, error: `HTTP ${getRes.status}` };
   } catch (getErr: any) {
     console.warn('GET parameter fallback also failed:', getErr);
-    return { success: false, error: getErr?.message || 'Error de red' };
+    return { success: false, error: getErr?.message || 'Error de conexión' };
   }
 }
 
@@ -229,6 +261,102 @@ export async function syncPendingQueue(customUrl?: string): Promise<{ syncedCoun
 }
 
 /**
+ * Force uploads an entire list of POIs to Google Sheets in one batch operation
+ */
+export async function forceBatchSyncAllToSheet(pois: POI[], customUrl?: string): Promise<{ success: boolean; count: number; error?: string }> {
+  const url = customUrl || getStoredScriptUrl();
+  if (!pois || pois.length === 0) {
+    return { success: false, count: 0, error: 'No hay POIs para sincronizar' };
+  }
+
+  // 1. Try batch sync first
+  const batchRes = await sendPayloadToScript(url, {
+    action: 'batch_sync',
+    pois: pois,
+  });
+
+  if (batchRes.success) {
+    // Clear pending queue and save local cache
+    savePendingSyncQueue([]);
+    saveCachedPOIs(pois);
+    return { success: true, count: pois.length };
+  }
+
+  // 2. If batch failed, fallback to sequential sync
+  let synced = 0;
+  for (const poi of pois) {
+    const itemRes = await sendPayloadToScript(url, {
+      action: 'update',
+      ...poi,
+    });
+    if (itemRes.success) synced++;
+  }
+
+  if (synced > 0) {
+    savePendingSyncQueue([]);
+    saveCachedPOIs(pois);
+    return { success: true, count: synced };
+  }
+
+  return { success: false, count: 0, error: batchRes.error || 'Error al conectar con Google Sheets' };
+}
+
+/**
+ * Test full connection (reading from Sheets and testing endpoint availability)
+ */
+export async function testSheetsConnection(customUrl?: string): Promise<{ success: boolean; poisCount: number; message: string; error?: string }> {
+  const url = customUrl || getStoredScriptUrl();
+
+  // Try server proxy test first
+  try {
+    const res = await fetch('/api/sheets/test-connection', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetUrl: url }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return {
+        success: data.success,
+        poisCount: data.poisCount || 0,
+        message: data.message || `Conexión verificada. ${data.poisCount || 0} POIs encontrados.`,
+      };
+    }
+  } catch {}
+
+  // Fallback to direct read
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+    const directRes = await fetch(url, { method: 'GET', signal: controller.signal });
+    clearTimeout(timeout);
+
+    if (directRes.ok) {
+      const data = await directRes.json();
+      const count = Array.isArray(data) ? data.length : 0;
+      return {
+        success: true,
+        poisCount: count,
+        message: `Conectado a Google Sheets. Se han recuperado ${count} POIs correctamente.`,
+      };
+    }
+  } catch (err: any) {
+    return {
+      success: false,
+      poisCount: 0,
+      message: 'No se pudo contactar con Google Apps Script.',
+      error: err?.message || 'Error de red',
+    };
+  }
+
+  return {
+    success: false,
+    poisCount: 0,
+    message: 'Error al contactar con la hoja de cálculo.',
+  };
+}
+
+/**
  * Fetch all POIs from Google Apps Script with smart merge and zero data loss
  */
 export async function fetchPOIsFromSheet(customUrl?: string): Promise<{ pois: POI[]; source: 'live' | 'cache'; error?: string; pendingCount: number }> {
@@ -237,103 +365,124 @@ export async function fetchPOIsFromSheet(customUrl?: string): Promise<{ pois: PO
   const localCustom = getLocalCustomRecords();
   const deletedIds = new Set(getDeletedIds());
 
-  // First, attempt background sync of any pending queue items
+  // Attempt background sync of any pending queue items first
   try {
     await syncPendingQueue(url);
   } catch (e) {
     console.warn('Queue flush attempt skipped:', e);
   }
 
+  // 1. Try fetching via server proxy first for 100% reliable cross-origin fetch
+  let rawData: any = null;
   try {
+    const proxyUrl = `/api/sheets/pois?url=${encodeURIComponent(url)}`;
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 12000);
 
-    const response = await fetch(url, {
-      method: 'GET',
-      signal: controller.signal,
-    });
+    const proxyRes = await fetch(proxyUrl, { signal: controller.signal });
     clearTimeout(timeoutId);
 
-    if (!response.ok) {
-      throw new Error(`HTTP error ${response.status}`);
+    if (proxyRes.ok) {
+      rawData = await proxyRes.json();
     }
-
-    const data = await response.json();
-    if (!Array.isArray(data)) {
-      throw new Error('La respuesta de Google Sheets no es una lista válida');
-    }
-
-    // Map and normalize remote POIs
-    const remotePOIs: POI[] = data
-      .filter((item: any) => {
-        const id = (item.id || item.ID || '').toString().trim();
-        // Skip POIs that the user deleted locally and haven't finished sync
-        return !deletedIds.has(id);
-      })
-      .map((item: any) => {
-        const id = (item.id || item.ID || '').toString().trim();
-        const localExt = extensionsMap[id] || {};
-        const localRec = localCustom[id];
-
-        const lat = typeof item.lat === 'number' ? item.lat : parseFloat((item.lat || '0').toString().replace(',', '.'));
-        const lng = typeof item.lng === 'number' ? item.lng : parseFloat((item.lng || '0').toString().replace(',', '.'));
-
-        let tags: string[] = [];
-        if (Array.isArray(item.tags)) {
-          tags = item.tags;
-        } else if (typeof item.tags === 'string' && item.tags.trim()) {
-          tags = item.tags.split(',').map((t: string) => t.trim()).filter(Boolean);
-        } else if (Array.isArray(localExt.tags)) {
-          tags = localExt.tags;
-        } else if (localRec && Array.isArray(localRec.tags)) {
-          tags = localRec.tags;
-        }
-
-        return {
-          id: id || `ID-${Math.random().toString(36).substr(2, 9).toUpperCase()}`,
-          lat: isNaN(lat) ? 0 : lat,
-          lng: isNaN(lng) ? 0 : lng,
-          nombre: (item.nombre || item.Nombre || localRec?.nombre || '').toString(),
-          descripcion: (item.descripcion || item.Descripcion || localRec?.descripcion || '').toString(),
-          categoria: (item.categoria || item.Categoria || localRec?.categoria || 'Otro').toString(),
-          ciudad: (item.ciudad || item.Ciudad || localRec?.ciudad || '').toString(),
-          // Extended attributes
-          rating: item.rating !== undefined && item.rating !== '' ? Number(item.rating) : (localExt.rating ?? localRec?.rating),
-          direccion: (item.direccion || localExt.direccion || localRec?.direccion || '').toString(),
-          telefono: (item.telefono || localExt.telefono || localRec?.telefono || '').toString(),
-          web: (item.web || localExt.web || localRec?.web || '').toString(),
-          horario: (item.horario || localExt.horario || localRec?.horario || '').toString(),
-          precio: (item.precio || localExt.precio || localRec?.precio || '').toString(),
-          tags: tags,
-          foto_url: (item.foto_url || localExt.foto_url || localRec?.foto_url || '').toString(),
-          favorito: item.favorito === true || item.favorito === 'TRUE' || localExt.favorito === true || localRec?.favorito === true,
-          notas_privadas: (item.notas_privadas || localExt.notas_privadas || localRec?.notas_privadas || '').toString(),
-          estado: (item.estado || localExt.estado || localRec?.estado || 'Pendiente').toString(),
-        };
-      });
-
-    // Zero data loss: check if there are local POIs not yet present in the remote sheet
-    const remoteIdSet = new Set(remotePOIs.map((p) => p.id));
-    const unmergedLocalPois: POI[] = Object.values(localCustom).filter((p) => !remoteIdSet.has(p.id) && !deletedIds.has(p.id));
-
-    const finalMergedPOIs = [...unmergedLocalPois, ...remotePOIs];
-    saveCachedPOIs(finalMergedPOIs);
-
-    return {
-      pois: finalMergedPOIs,
-      source: 'live',
-      pendingCount: getPendingSyncCount(),
-    };
-  } catch (error: any) {
-    console.warn('Could not fetch from live Google Sheet, using cache:', error);
-    const cached = getCachedPOIs();
-    return {
-      pois: cached,
-      source: 'cache',
-      error: error?.message || 'No se pudo conectar con Google Sheets en este momento. Usando datos guardados.',
-      pendingCount: getPendingSyncCount(),
-    };
+  } catch (proxyErr) {
+    console.warn('Server proxy fetch failed, attempting direct fetch:', proxyErr);
   }
+
+  // 2. Fallback to direct client fetch if proxy didn't return an array
+  if (!Array.isArray(rawData)) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 12000);
+
+      const response = await fetch(url, {
+        method: 'GET',
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      if (response.ok) {
+        rawData = await response.json();
+      }
+    } catch (directErr: any) {
+      console.warn('Direct fetch also failed:', directErr);
+    }
+  }
+
+  // Process data if successfully retrieved
+  if (Array.isArray(rawData)) {
+    try {
+      const remotePOIs: POI[] = rawData
+        .filter((item: any) => {
+          const id = (item.id || item.ID || '').toString().trim();
+          return !deletedIds.has(id);
+        })
+        .map((item: any) => {
+          const id = (item.id || item.ID || '').toString().trim();
+          const localExt = extensionsMap[id] || {};
+          const localRec = localCustom[id];
+
+          const lat = typeof item.lat === 'number' ? item.lat : parseFloat((item.lat || '0').toString().replace(',', '.'));
+          const lng = typeof item.lng === 'number' ? item.lng : parseFloat((item.lng || '0').toString().replace(',', '.'));
+
+          let tags: string[] = [];
+          if (Array.isArray(item.tags)) {
+            tags = item.tags;
+          } else if (typeof item.tags === 'string' && item.tags.trim()) {
+            tags = item.tags.split(',').map((t: string) => t.trim()).filter(Boolean);
+          } else if (Array.isArray(localExt.tags)) {
+            tags = localExt.tags;
+          } else if (localRec && Array.isArray(localRec.tags)) {
+            tags = localRec.tags;
+          }
+
+          return {
+            id: id || `ID-${Math.random().toString(36).substr(2, 9).toUpperCase()}`,
+            lat: isNaN(lat) ? 0 : lat,
+            lng: isNaN(lng) ? 0 : lng,
+            nombre: (item.nombre || item.Nombre || localRec?.nombre || '').toString(),
+            descripcion: (item.descripcion || item.Descripcion || localRec?.descripcion || '').toString(),
+            categoria: (item.categoria || item.Categoria || localRec?.categoria || 'Otro').toString(),
+            ciudad: (item.ciudad || item.Ciudad || localRec?.ciudad || '').toString(),
+            rating: item.rating !== undefined && item.rating !== '' ? Number(item.rating) : (localExt.rating ?? localRec?.rating),
+            direccion: (item.direccion || localExt.direccion || localRec?.direccion || '').toString(),
+            telefono: (item.telefono || localExt.telefono || localRec?.telefono || '').toString(),
+            web: (item.web || localExt.web || localRec?.web || '').toString(),
+            horario: (item.horario || localExt.horario || localRec?.horario || '').toString(),
+            precio: (item.precio || localExt.precio || localRec?.precio || '').toString(),
+            tags: tags,
+            foto_url: (item.foto_url || localExt.foto_url || localRec?.foto_url || '').toString(),
+            favorito: item.favorito === true || item.favorito === 'TRUE' || localExt.favorito === true || localRec?.favorito === true,
+            notas_privadas: (item.notas_privadas || localExt.notas_privadas || localRec?.notas_privadas || '').toString(),
+            estado: (item.estado || localExt.estado || localRec?.estado || 'Pendiente').toString(),
+          };
+        });
+
+      // Zero data loss: check if there are local POIs not yet present in the remote sheet
+      const remoteIdSet = new Set(remotePOIs.map((p) => p.id));
+      const unmergedLocalPois: POI[] = Object.values(localCustom).filter((p) => !remoteIdSet.has(p.id) && !deletedIds.has(p.id));
+
+      const finalMergedPOIs = [...unmergedLocalPois, ...remotePOIs];
+      saveCachedPOIs(finalMergedPOIs);
+
+      return {
+        pois: finalMergedPOIs,
+        source: 'live',
+        pendingCount: getPendingSyncCount(),
+      };
+    } catch (parseErr: any) {
+      console.error('Error processing remote POIs:', parseErr);
+    }
+  }
+
+  // Fallback to local cache
+  const cached = getCachedPOIs();
+  return {
+    pois: cached,
+    source: 'cache',
+    error: 'No se pudo conectar con Google Sheets en este momento. Mostrando copia local.',
+    pendingCount: getPendingSyncCount(),
+  };
 }
 
 /**
@@ -480,7 +629,7 @@ export async function deletePOIFromSheet(poiId: string, customUrl?: string): Pro
   return { success: true, error: 'Eliminado del dispositivo. Pendiente de sincronizar con Google Sheets.' };
 }
 
-// Free reverse geocoding using OpenStreetMap Nominatim for user convenience
+// Free reverse geocoding using OpenStreetMap Nominatim
 export async function reverseGeocode(lat: number, lng: number): Promise<{ ciudad?: string; direccion?: string }> {
   try {
     const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`, {
@@ -495,7 +644,6 @@ export async function reverseGeocode(lat: number, lng: number): Promise<{ ciudad
     const addr = data.address;
     const ciudad = addr.city || addr.town || addr.village || addr.municipality || addr.county || '';
     
-    // Format a readable address
     const road = addr.road || addr.pedestrian || addr.street || '';
     const houseNumber = addr.house_number ? `, ${addr.house_number}` : '';
     const suburb = addr.suburb || addr.neighbourhood ? ` (${addr.suburb || addr.neighbourhood})` : '';
@@ -509,4 +657,3 @@ export async function reverseGeocode(lat: number, lng: number): Promise<{ ciudad
     return {};
   }
 }
-

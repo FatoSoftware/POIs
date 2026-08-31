@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { POI } from '../types';
 import {
   DEFAULT_SCRIPT_URL,
@@ -7,7 +7,10 @@ import {
 import {
   getStoredScriptUrl,
   setStoredScriptUrl,
-  fetchPOIsFromSheet,
+  testSheetsConnection,
+  forceBatchSyncAllToSheet,
+  getPendingSyncCount,
+  syncPendingQueue,
   saveCachedPOIs,
 } from '../services/api';
 import {
@@ -22,11 +25,13 @@ import {
   AlertCircle,
   Download,
   Upload,
-  ExternalLink,
   Database,
-  Layers,
   Globe,
   GitBranch,
+  CloudUpload,
+  RefreshCw,
+  Info,
+  ShieldCheck,
 } from 'lucide-react';
 
 interface SettingsModalProps {
@@ -49,7 +54,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [copiedActionCode, setCopiedActionCode] = useState(false);
   const [testingStatus, setTestingStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
   const [testResultMsg, setTestResultMsg] = useState<string | null>(null);
+  const [syncingAllStatus, setSyncingAllStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
+  const [syncResultMsg, setSyncResultMsg] = useState<string | null>(null);
+  const [pendingCount, setPendingCount] = useState<number>(0);
   const [activeTab, setActiveTab] = useState<'connection' | 'code' | 'backup' | 'github'>('connection');
+
+  useEffect(() => {
+    if (isOpen) {
+      setUrl(getStoredScriptUrl());
+      setPendingCount(getPendingSyncCount());
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -68,17 +83,57 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setTestingStatus('testing');
     setTestResultMsg(null);
     try {
-      const res = await fetchPOIsFromSheet(url);
-      if (res.source === 'live') {
+      const res = await testSheetsConnection(url);
+      if (res.success) {
         setTestingStatus('success');
-        setTestResultMsg(`¡Conexión exitosa! Se han recuperado ${res.pois.length} POIs desde Google Sheets.`);
+        setTestResultMsg(res.message);
       } else {
         setTestingStatus('error');
-        setTestResultMsg(res.error || 'No se pudo conectar en directo. Verifica los permisos de la aplicación web.');
+        setTestResultMsg(res.error || res.message || 'No se pudo conectar en directo. Verifica los permisos de la aplicación web.');
       }
     } catch (e: any) {
       setTestingStatus('error');
       setTestResultMsg(e.message || 'Error de conexión.');
+    }
+  };
+
+  const handleForceUploadAll = async () => {
+    setSyncingAllStatus('syncing');
+    setSyncResultMsg(null);
+    try {
+      const res = await forceBatchSyncAllToSheet(allPOIs, url);
+      if (res.success) {
+        setSyncingAllStatus('success');
+        setSyncResultMsg(`¡Éxito! Se han subido y actualizado ${res.count} POIs en tu Google Sheet.`);
+        setPendingCount(0);
+        onReload();
+      } else {
+        setSyncingAllStatus('error');
+        setSyncResultMsg(res.error || 'Error al sincronizar con Google Sheets.');
+      }
+    } catch (e: any) {
+      setSyncingAllStatus('error');
+      setSyncResultMsg(e.message || 'Error durante la sincronización.');
+    }
+  };
+
+  const handleFlushPending = async () => {
+    setSyncingAllStatus('syncing');
+    setSyncResultMsg(null);
+    try {
+      const res = await syncPendingQueue(url);
+      setPendingCount(res.remainingCount);
+      if (res.remainingCount === 0) {
+        setSyncingAllStatus('success');
+        setSyncResultMsg(`Se han sincronizado los ${res.syncedCount} cambios pendientes.`);
+      } else {
+        setSyncingAllStatus('error');
+        setSyncResultMsg(`Se sincronizaron ${res.syncedCount} cambios, pero ${res.remainingCount} siguen pendientes.`);
+      }
+      onReload();
+    } catch (e: any) {
+      setSyncingAllStatus('error');
+      setSyncResultMsg(e.message || 'Error al procesar la cola pendiente.');
     }
   };
 
@@ -113,7 +168,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         } else {
           alert('El archivo no tiene un formato de lista de POIs válido.');
         }
-      } catch (err) {
+      } catch {
         alert('Error al leer el archivo JSON.');
       }
     };
@@ -133,8 +188,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <Settings className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-bold text-base text-slate-800">Conexión con Google Sheets</h3>
-              <p className="text-xs text-slate-500">Configuración del backend y sincronización de datos</p>
+              <h3 className="font-bold text-base text-slate-800">Conexión Bidireccional con Google Sheets</h3>
+              <p className="text-xs text-slate-500">Sincronización multi-dispositivo y backend Apps Script</p>
             </div>
           </div>
           <button
@@ -146,50 +201,50 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </div>
 
         {/* Tab Navigation */}
-        <div className="flex border-b border-slate-200 bg-white px-4 shrink-0">
+        <div className="flex border-b border-slate-200 bg-white px-4 shrink-0 overflow-x-auto">
           <button
             type="button"
             onClick={() => setActiveTab('connection')}
-            className={`py-2.5 px-3 text-xs font-semibold border-b-2 transition-all flex items-center gap-1.5 ${
+            className={`py-2.5 px-3 text-xs font-semibold border-b-2 transition-all flex items-center gap-1.5 whitespace-nowrap ${
               activeTab === 'connection'
                 ? 'border-teal-500 text-teal-700'
                 : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
             <Link className="w-3.5 h-3.5" />
-            <span>URL de Apps Script</span>
+            <span>Enlace y Sincronización</span>
           </button>
 
           <button
             type="button"
             onClick={() => setActiveTab('code')}
-            className={`py-2.5 px-3 text-xs font-semibold border-b-2 transition-all flex items-center gap-1.5 ${
+            className={`py-2.5 px-3 text-xs font-semibold border-b-2 transition-all flex items-center gap-1.5 whitespace-nowrap ${
               activeTab === 'code'
                 ? 'border-teal-500 text-teal-700'
                 : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
             <Code2 className="w-3.5 h-3.5" />
-            <span>Código Apps Script Moderno</span>
+            <span>Código Apps Script (Requerido)</span>
           </button>
 
           <button
             type="button"
             onClick={() => setActiveTab('backup')}
-            className={`py-2.5 px-3 text-xs font-semibold border-b-2 transition-all flex items-center gap-1.5 ${
+            className={`py-2.5 px-3 text-xs font-semibold border-b-2 transition-all flex items-center gap-1.5 whitespace-nowrap ${
               activeTab === 'backup'
                 ? 'border-teal-500 text-teal-700'
                 : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
             <Database className="w-3.5 h-3.5" />
-            <span>Copia de Seguridad & Exportar</span>
+            <span>Copia de Seguridad</span>
           </button>
 
           <button
             type="button"
             onClick={() => setActiveTab('github')}
-            className={`py-2.5 px-3 text-xs font-semibold border-b-2 transition-all flex items-center gap-1.5 ${
+            className={`py-2.5 px-3 text-xs font-semibold border-b-2 transition-all flex items-center gap-1.5 whitespace-nowrap ${
               activeTab === 'github'
                 ? 'border-teal-500 text-teal-700'
                 : 'border-transparent text-slate-500 hover:text-slate-800'
@@ -205,15 +260,81 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           {/* TAB 1: CONNECTION */}
           {activeTab === 'connection' && (
             <div className="space-y-4">
+              {/* Info banner explaining multi-device sync */}
               <div className="p-3.5 bg-teal-50/70 border border-teal-200/80 rounded-2xl text-xs text-teal-900 leading-relaxed">
                 <p className="font-semibold mb-1 flex items-center gap-1.5">
-                  <Database className="w-4 h-4 text-teal-600" />
-                  Base de Datos en Google Sheets
+                  <ShieldCheck className="w-4 h-4 text-teal-600" />
+                  Sincronización Multi-Dispositivo con Google Sheets
                 </p>
                 <p>
-                  Tu aplicación se conecta directamente a la aplicación web de Apps Script vinculada a tu hoja de cálculo.
-                  Los datos actuales se conservan al 100% y se pueden enriquecer con los nuevos campos.
+                  Cualquier POI creado o editado desde el móvil o el ordenador se actualiza directamente en la hoja de cálculo.
+                  Si modificaste POIs en el teléfono y aún no los ves en Sheets, pulsa el botón de <strong>"Subir todos los POIs locales a Sheets"</strong> a continuación.
                 </p>
+              </div>
+
+              {/* Pending changes alert if any */}
+              {pendingCount > 0 && (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl flex items-center justify-between gap-3 text-xs text-amber-900">
+                  <div className="flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                    <span>Tienes <strong>{pendingCount} cambios pendientes</strong> de sincronizar en este dispositivo.</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleFlushPending}
+                    disabled={syncingAllStatus === 'syncing'}
+                    className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-semibold transition-colors shrink-0 flex items-center gap-1"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${syncingAllStatus === 'syncing' ? 'animate-spin' : ''}`} />
+                    <span>Sincronizar ahora</span>
+                  </button>
+                </div>
+              )}
+
+              {/* Batch Upload Section */}
+              <div className="p-4 bg-slate-900 text-white rounded-2xl space-y-2.5 shadow-xs">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <CloudUpload className="w-4 h-4 text-teal-400" />
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-100">
+                      Sincronización Total a Sheets (Batch Upload)
+                    </h4>
+                  </div>
+                  <span className="text-[11px] bg-slate-800 text-teal-300 font-mono px-2 py-0.5 rounded-full border border-slate-700">
+                    {allPOIs.length} POIs disponibles
+                  </span>
+                </div>
+                <p className="text-xs text-slate-300">
+                  Envía todos los POIs actuales con todas sus modificaciones a tu Google Sheet en un único lote rápido.
+                </p>
+                <div className="pt-1">
+                  <button
+                    type="button"
+                    onClick={handleForceUploadAll}
+                    disabled={syncingAllStatus === 'syncing'}
+                    className="px-4 py-2 bg-teal-500 hover:bg-teal-400 text-slate-950 font-bold rounded-xl text-xs transition-all flex items-center gap-2 cursor-pointer shadow-md disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${syncingAllStatus === 'syncing' ? 'animate-spin' : ''}`} />
+                    <span>{syncingAllStatus === 'syncing' ? 'Subiendo a Google Sheets...' : `Subir y Actualizar los ${allPOIs.length} POIs en Sheets`}</span>
+                  </button>
+                </div>
+
+                {syncResultMsg && (
+                  <div
+                    className={`mt-2 p-2.5 rounded-xl border text-xs flex items-center gap-2 ${
+                      syncingAllStatus === 'success'
+                        ? 'bg-emerald-950/80 border-emerald-500/50 text-emerald-200'
+                        : 'bg-rose-950/80 border-rose-500/50 text-rose-200'
+                    }`}
+                  >
+                    {syncingAllStatus === 'success' ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    ) : (
+                      <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                    )}
+                    <span>{syncResultMsg}</span>
+                  </div>
+                )}
               </div>
 
               <div>
@@ -237,7 +358,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                 >
                   <Link className="w-3.5 h-3.5" />
-                  <span>{testingStatus === 'testing' ? 'Probando...' : 'Probar Conexión Live'}</span>
+                  <span>{testingStatus === 'testing' ? 'Verificando...' : 'Comprobar Enlace con Sheets'}</span>
                 </button>
 
                 <button
@@ -272,13 +393,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           {/* TAB 2: CODE */}
           {activeTab === 'code' && (
             <div className="space-y-3">
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl text-xs text-amber-900 flex items-start gap-2.5">
+                <Info className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-bold mb-0.5">¡Paso Crucial para Actualizar en Sheets!</p>
+                  <p className="text-amber-800 leading-relaxed">
+                    Si modificaste POIs y no se guardaron en Sheets, es porque tu script de Google Sheets debe tener habilitadas las funciones de escritura (POST/GET/Batch). Pega este código y publica una <strong>"Nueva versión"</strong> en Apps Script siguiendo los pasos abajo.
+                  </p>
+                </div>
+              </div>
+
               <div className="flex items-center justify-between">
                 <div>
                   <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-                    Código Apps Script Actualizado
+                    Código Apps Script Actualizado y Completo
                   </h4>
                   <p className="text-xs text-slate-500">
-                    Compatible con columnas A-G existentes y ampliable a las nuevas columnas de forma automática.
+                    Soporta lectura, creación, modificación, borrado y subida masiva por lotes (Batch Sync).
                   </p>
                 </div>
                 <button
@@ -296,14 +427,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </pre>
               </div>
 
-              <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 text-xs text-slate-600 space-y-1.5">
-                <p className="font-bold text-slate-800">Pasos para actualizar en Google Sheets:</p>
-                <ol className="list-decimal list-inside space-y-1 text-slate-600 pl-1">
-                  <li>Abre tu hoja de cálculo de Google Sheets.</li>
-                  <li>Ve al menú superior: <strong className="text-slate-800">Extensiones</strong> &rarr; <strong className="text-slate-800">Apps Script</strong>.</li>
-                  <li>Reemplaza el código con el copiado arriba.</li>
-                  <li>Haz clic en <strong className="text-slate-800">Implementar</strong> &rarr; <strong className="text-slate-800">Nueva implementación</strong>.</li>
-                  <li>Selecciona tipo <strong className="text-slate-800">Aplicación web</strong>, Ejecutar como <strong className="text-slate-800">"Yo"</strong> y Acceso <strong className="text-slate-800">"Cualquiera"</strong>.</li>
+              <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 text-xs text-slate-700 space-y-2">
+                <p className="font-bold text-slate-900">Pasos exactos en Google Sheets (1 minuto):</p>
+                <ol className="list-decimal list-inside space-y-1.5 text-slate-600 pl-1">
+                  <li>Abre tu hoja de Google Sheets.</li>
+                  <li>En el menú superior haz clic en <strong className="text-slate-800">Extensiones</strong> &rarr; <strong className="text-slate-800">Apps Script</strong>.</li>
+                  <li>Borra todo el contenido del archivo y <strong>pega el código copiado</strong>.</li>
+                  <li>Haz clic en el botón azul superior <strong className="text-slate-800">Implementar</strong> &rarr; <strong className="text-slate-800">Administrar implementaciones</strong> (o Nueva implementación).</li>
+                  <li>Haz clic en el icono del <strong className="text-slate-800">lápiz (Editar)</strong> &rarr; en Versión selecciona <strong className="text-teal-700 font-bold bg-teal-50 px-1.5 py-0.5 rounded border border-teal-200">Nueva versión</strong> &rarr; <strong className="text-slate-800">Implementar</strong>.</li>
+                  <li>Asegúrate de que el acceso esté en <strong className="text-slate-800">"Cualquiera"</strong> (anónimo).</li>
                 </ol>
               </div>
             </div>
@@ -409,7 +541,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Install dependencies
         run: npm install
       - name: Build static project
         run: npm run build

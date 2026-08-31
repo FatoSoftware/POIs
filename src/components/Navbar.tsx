@@ -9,9 +9,9 @@ import {
   Map,
   LayoutGrid,
   Columns,
-  Palette,
   Check,
   Tag,
+  CloudUpload,
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -27,6 +27,8 @@ interface NavbarProps {
   syncSource: 'live' | 'cache';
   currentTheme: AppTheme;
   onSelectTheme: (theme: AppTheme) => void;
+  pendingCount?: number;
+  onSyncPending?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -42,6 +44,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   syncSource,
   currentTheme,
   onSelectTheme,
+  pendingCount = 0,
+  onSyncPending,
 }) => {
   const [showThemeMenu, setShowThemeMenu] = useState(false);
 
@@ -67,7 +71,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
                     : 'bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
                 }`}
-                title={syncSource === 'live' ? 'Sincronizado con Google Sheets' : 'Modo local / caché'}
+                title={syncSource === 'live' ? 'Sincronizado con Google Sheets' : 'Modo local / guardado en el dispositivo'}
               >
                 <span
                   className={`w-1.5 h-1.5 rounded-full ${
@@ -75,9 +79,23 @@ export const Navbar: React.FC<NavbarProps> = ({
                   } ${isSyncing ? 'animate-ping' : ''}`}
                 />
                 <span className="hidden xs:inline">
-                  {syncSource === 'live' ? 'Sheets Live' : 'Caché'}
+                  {syncSource === 'live' ? 'Sheets Live' : 'Local'}
                 </span>
               </span>
+
+              {/* Pending changes badge */}
+              {pendingCount > 0 && onSyncPending && (
+                <button
+                  type="button"
+                  onClick={onSyncPending}
+                  disabled={isSyncing}
+                  className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500 hover:bg-amber-600 text-white flex items-center gap-1 animate-pulse transition-all cursor-pointer shrink-0 shadow-xs"
+                  title="Hay cambios pendientes de subir a Sheets. Pulsa para sincronizar ahora."
+                >
+                  <CloudUpload className="w-3 h-3" />
+                  <span>Subir ({pendingCount})</span>
+                </button>
+              )}
             </div>
             <p className="text-[11px] text-slate-500 dark:text-slate-400 hidden sm:block truncate mt-0.5">
               {filteredCount === totalCount ? (
@@ -191,11 +209,11 @@ export const Navbar: React.FC<NavbarProps> = ({
             <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin text-teal-600' : ''}`} />
           </button>
 
-          {/* Settings & Apps Script (Hidden on mobile for safety - only desktop) */}
+          {/* Settings & Apps Script */}
           <button
             onClick={onOpenSettings}
-            className="hidden md:flex p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:text-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 active:scale-95 border border-slate-200 dark:border-slate-700 transition-all min-w-[40px] min-h-[40px] items-center justify-center cursor-pointer"
-            title="Ajustes y Apps Script (Versión de escritorio)"
+            className="p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:text-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 active:scale-95 border border-slate-200 dark:border-slate-700 transition-all min-w-[40px] min-h-[40px] flex items-center justify-center cursor-pointer"
+            title="Ajustes y sincronización con Google Sheets"
           >
             <Settings className="w-4 h-4" />
           </button>

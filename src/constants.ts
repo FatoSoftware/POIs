@@ -348,7 +348,7 @@ export const INITIAL_POIS_SAMPLE: POI[] = [
 
 export const MODERN_APPS_SCRIPT_CODE = `/**
  * BACKEND GOOGLE APPS SCRIPT PARA GESTOR DE POIS
- * Compatible 100% con creación, edición y eliminación tanto por POST como por GET.
+ * Compatible 100% con creación, edición, eliminación y sincronización por lotes (Batch Sync).
  * 
  * Instrucciones:
  * 1. En tu hoja de Google Sheets, ve a Extensiones -> Apps Script.
@@ -373,7 +373,7 @@ function doPost(e) {
 
 function handleRequest(e) {
   const lock = LockService.getScriptLock();
-  lock.tryLock(15000);
+  lock.tryLock(20000);
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     let sheet = ss.getSheetByName(SHEET_NAME);
@@ -393,9 +393,7 @@ function handleRequest(e) {
       try {
         data = JSON.parse(e.postData.contents);
         action = data.action;
-      } catch (err) {
-        // Fallback if raw text
-      }
+      } catch (err) {}
     }
     
     if (!data && e && e.parameter) {
@@ -415,43 +413,85 @@ function handleRequest(e) {
       }
     }
 
-    // Process Actions: create, update, delete
-    if (data && action && action !== 'read' && action !== 'ping') {
-      const latStr = data.lat !== undefined && data.lat !== null ? data.lat.toString().replace('.', ',') : '0';
-      const lngStr = data.lng !== undefined && data.lng !== null ? data.lng.toString().replace('.', ',') : '0';
+    // Helper: convert POI object to row values array
+    function formatRow(poiData) {
+      const latStr = poiData.lat !== undefined && poiData.lat !== null ? poiData.lat.toString().replace('.', ',') : '0';
+      const lngStr = poiData.lng !== undefined && poiData.lng !== null ? poiData.lng.toString().replace('.', ',') : '0';
+      const tagsStr = Array.isArray(poiData.tags) ? poiData.tags.join(',') : (poiData.tags || '');
+      const ratingVal = poiData.rating !== undefined && poiData.rating !== null ? poiData.rating : '';
+      const favoritoVal = (poiData.favorito === true || poiData.favorito === 'TRUE' || poiData.favorito === 'true') ? 'TRUE' : 'FALSE';
 
-      const tagsStr = Array.isArray(data.tags) ? data.tags.join(',') : (data.tags || '');
-      const ratingVal = data.rating !== undefined && data.rating !== null ? data.rating : '';
-      const favoritoVal = (data.favorito === true || data.favorito === 'TRUE' || data.favorito === 'true') ? 'TRUE' : 'FALSE';
-
-      const rowValues = [
+      return [
         latStr,
         lngStr,
-        data.nombre || '',
-        data.descripcion || '',
-        data.categoria || 'Otro',
-        data.ciudad || '',
+        poiData.nombre || '',
+        poiData.descripcion || '',
+        poiData.categoria || 'Otro',
+        poiData.ciudad || '',
         ratingVal,
-        data.direccion || '',
-        data.telefono || '',
-        data.web || '',
-        data.horario || '',
-        data.precio || '',
+        poiData.direccion || '',
+        poiData.telefono || '',
+        poiData.web || '',
+        poiData.horario || '',
+        poiData.precio || '',
         tagsStr,
-        data.foto_url || '',
+        poiData.foto_url || '',
         favoritoVal,
-        data.notas_privadas || '',
-        data.estado || 'Pendiente'
+        poiData.notas_privadas || '',
+        poiData.estado || 'Pendiente'
       ];
+    }
+
+    // Process Action: BATCH SYNC (Fast bulk update)
+    if (data && (action === 'batch_sync' || action === 'batch') && Array.isArray(data.pois)) {
+      const rows = sheet.getDataRange().getValues();
+      const idToRowIndex = {};
+      for (let i = 1; i < rows.length; i++) {
+        if (rows[i][0]) {
+          idToRowIndex[rows[i][0].toString().trim()] = i + 1;
+        }
+      }
+
+      let updatedCount = 0;
+      let insertedCount = 0;
+
+      for (let p = 0; p < data.pois.length; p++) {
+        const item = data.pois[p];
+        const poiId = (item.id || '').toString().trim() || ("ID-" + Math.random().toString(36).substr(2, 9).toUpperCase());
+        const rowVals = formatRow(item);
+
+        if (idToRowIndex[poiId]) {
+          const rowIndex = idToRowIndex[poiId];
+          sheet.getRange(rowIndex, 2, 1, rowVals.length).setValues([rowVals]);
+          updatedCount++;
+        } else {
+          sheet.appendRow([poiId, ...rowVals]);
+          idToRowIndex[poiId] = sheet.getLastRow();
+          insertedCount++;
+        }
+      }
+
+      return response({
+        status: "success",
+        action: "batch_sync",
+        updated: updatedCount,
+        inserted: insertedCount,
+        total: data.pois.length
+      });
+    }
+
+    // Process Actions: create, update, delete
+    if (data && action && action !== 'read' && action !== 'ping') {
+      const rowValues = formatRow(data);
+      const idBusqueda = data.id ? data.id.toString().trim() : "";
 
       if (action === "create") {
-        const newId = data.id || ("ID-" + Math.random().toString(36).substr(2, 9).toUpperCase());
+        const newId = idBusqueda || ("ID-" + Math.random().toString(36).substr(2, 9).toUpperCase());
         sheet.appendRow([newId, ...rowValues]);
         return response({status: "success", action: "create", id: newId});
       
       } else if (action === "update") {
         const rows = sheet.getDataRange().getValues();
-        const idBusqueda = data.id ? data.id.toString().trim() : "";
         for (let i = 1; i < rows.length; i++) {
           if (rows[i][0] && rows[i][0].toString().trim() === idBusqueda) {
             sheet.getRange(i + 1, 2, 1, rowValues.length).setValues([rowValues]);
@@ -465,7 +505,6 @@ function handleRequest(e) {
 
       } else if (action === "delete") {
         const rows = sheet.getDataRange().getValues();
-        const idBusqueda = data.id ? data.id.toString().trim() : "";
         for (let i = 1; i < rows.length; i++) {
           if (rows[i][0] && rows[i][0].toString().trim() === idBusqueda) {
             sheet.deleteRow(i + 1);
