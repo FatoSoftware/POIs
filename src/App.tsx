@@ -1,6 +1,12 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { POI, FilterState, AppTheme, GPSLocation, CategoryMeta } from './types';
-import { fetchPOIsFromSheet, savePOIToSheet, deletePOIFromSheet } from './services/api';
+import {
+  fetchPOIsFromSheet,
+  savePOIToSheet,
+  deletePOIFromSheet,
+  getPendingSyncCount,
+  syncPendingQueue,
+} from './services/api';
 import { calculateHaversineDistance } from './utils/geo';
 import {
   getStoredCategories,
@@ -92,30 +98,42 @@ export default function App() {
     }, 3500);
   };
 
-  // Initial Load from Google Sheets
-  const loadData = async (silent = false) => {
+  // Initial Load from Google Sheets & Automatic Merge
+  const loadData = useCallback(async (silent = false) => {
     if (!silent) setIsSyncing(true);
     try {
       const res = await fetchPOIsFromSheet();
       setPois(res.pois);
       setSyncSource(res.source);
       if (res.source === 'live') {
-        if (!silent)
-          showToast(`Sincronizados ${res.pois.length} POIs desde Google Sheets`, 'success');
+        if (!silent) {
+          if (res.pendingCount > 0) {
+            showToast(`Sincronizados ${res.pois.length} POIs (${res.pendingCount} pendientes de confirmar en Sheets)`, 'info');
+          } else {
+            showToast(`Sincronizados ${res.pois.length} POIs desde Google Sheets`, 'success');
+          }
+        }
       } else if (res.error) {
-        if (!silent) showToast(`Modo local activado: ${res.error}`, 'info');
+        if (!silent) showToast(`Modo guardado local: ${res.pois.length} POIs disponibles`, 'info');
       }
     } catch {
-      showToast('Error al conectar con Google Sheets', 'error');
+      showToast('Error al conectar con Google Sheets, usando copia local', 'error');
     } finally {
       setIsSyncing(false);
       setIsLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     loadData();
-  }, []);
+
+    const handleOnline = () => {
+      showToast('Conexión reestablecida. Sincronizando...', 'info');
+      loadData(true);
+    };
+    window.addEventListener('online', handleOnline);
+    return () => window.removeEventListener('online', handleOnline);
+  }, [loadData]);
 
   // Request high-accuracy GPS
   const handleRequestGPS = () => {
@@ -223,7 +241,7 @@ export default function App() {
     return result;
   }, [pois, filters, userLocation]);
 
-  // POI Save Handler (Create / Edit)
+  // POI Save Handler (Create / Edit) with zero data loss guarantee
   const handleSavePOI = async (poi: POI, isEdit: boolean) => {
     const res = await savePOIToSheet(poi, isEdit);
     const updatedPoi = { ...poi, id: res.id || poi.id };
@@ -233,11 +251,19 @@ export default function App() {
       if (detailModalPoi?.id === updatedPoi.id) {
         setDetailModalPoi(updatedPoi);
       }
-      showToast(`"${updatedPoi.nombre}" actualizado correctamente.`);
+      if (res.isOffline) {
+        showToast(`"${updatedPoi.nombre}" guardado en el dispositivo. Pendiente de sincronizar.`, 'info');
+      } else {
+        showToast(`"${updatedPoi.nombre}" guardado y sincronizado con Google Sheets.`, 'success');
+      }
     } else {
-      setPois((prev) => [updatedPoi, ...prev]);
+      setPois((prev) => [updatedPoi, ...prev.filter((p) => p.id !== updatedPoi.id)]);
       setSelectedPoi(updatedPoi);
-      showToast(`"${updatedPoi.nombre}" guardado en Google Sheets.`);
+      if (res.isOffline) {
+        showToast(`"${updatedPoi.nombre}" creado y guardado en tu dispositivo.`, 'info');
+      } else {
+        showToast(`"${updatedPoi.nombre}" guardado y sincronizado con Google Sheets.`, 'success');
+      }
     }
   };
 
@@ -440,8 +466,6 @@ export default function App() {
             sortOrder: 'asc',
           })
         }
-        viewMode={viewMode}
-        setViewMode={setViewMode}
         hasUserLocation={Boolean(userLocation)}
         categories={categories}
         onOpenCategoryManager={() => setCategoryModalOpen(true)}

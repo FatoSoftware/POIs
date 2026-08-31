@@ -348,14 +348,16 @@ export const INITIAL_POIS_SAMPLE: POI[] = [
 
 export const MODERN_APPS_SCRIPT_CODE = `/**
  * BACKEND GOOGLE APPS SCRIPT PARA GESTOR DE POIS
- * Este script es 100% compatible con tus datos actuales y admite los nuevos campos enriquecidos.
+ * Compatible 100% con creación, edición y eliminación tanto por POST como por GET.
  * 
  * Instrucciones:
  * 1. En tu hoja de Google Sheets, ve a Extensiones -> Apps Script.
- * 2. Pega este código reemplazando el anterior.
- * 3. Haz clic en "Implementar" -> "Nueva implementación" -> Tipo "Aplicación web".
- * 4. Ejecutar como: "Yo" | Quién tiene acceso: "Cualquiera" (Anyone).
- * 5. Copia la URL generada y pégala en la configuración de la app.
+ * 2. Pega este código reemplazando todo el contenido anterior.
+ * 3. Haz clic en "Implementar" -> "Nueva implementación" (o Administrar implementaciones -> Editar -> Nueva versión).
+ * 4. Tipo: "Aplicación web".
+ * 5. Ejecutar como: "Yo" (tu cuenta de Google).
+ * 6. Quién tiene acceso: "Cualquiera" (Anyone / Anónimo).
+ * 7. Copia la URL generada y pégala en la configuración de la app.
  */
 
 const SHEET_NAME = "POIs"; 
@@ -371,30 +373,56 @@ function doPost(e) {
 
 function handleRequest(e) {
   const lock = LockService.getScriptLock();
-  lock.tryLock(10000);
+  lock.tryLock(15000);
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     let sheet = ss.getSheetByName(SHEET_NAME);
     if (!sheet) {
       sheet = ss.insertSheet(SHEET_NAME);
-      // Cabeceras recomendadas si es una hoja nueva
       sheet.appendRow([
         "ID", "Lat", "Lng", "Nombre", "Descripcion", "Categoria", "Ciudad",
         "Rating", "Direccion", "Telefono", "Web", "Horario", "Precio", "Tags", "Foto_URL", "Favorito", "Notas_Privadas", "Estado"
       ]);
     }
     
-    if (e.postData && e.postData.contents) {
-      const data = JSON.parse(e.postData.contents);
-      const action = data.action;
-      
-      // Coordenadas con formato compatible
+    // Parse request payload from POST body or GET/POST query parameters
+    let data = null;
+    let action = null;
+
+    if (e && e.postData && e.postData.contents) {
+      try {
+        data = JSON.parse(e.postData.contents);
+        action = data.action;
+      } catch (err) {
+        // Fallback if raw text
+      }
+    }
+    
+    if (!data && e && e.parameter) {
+      if (e.parameter.data) {
+        try {
+          data = JSON.parse(e.parameter.data);
+          action = data.action || e.parameter.action;
+        } catch (err) {}
+      } else if (e.parameter.payload) {
+        try {
+          data = JSON.parse(e.parameter.payload);
+          action = data.action || e.parameter.action;
+        } catch (err) {}
+      } else if (e.parameter.action && e.parameter.action !== 'read' && e.parameter.action !== 'ping') {
+        data = e.parameter;
+        action = e.parameter.action;
+      }
+    }
+
+    // Process Actions: create, update, delete
+    if (data && action && action !== 'read' && action !== 'ping') {
       const latStr = data.lat !== undefined && data.lat !== null ? data.lat.toString().replace('.', ',') : '0';
       const lngStr = data.lng !== undefined && data.lng !== null ? data.lng.toString().replace('.', ',') : '0';
 
       const tagsStr = Array.isArray(data.tags) ? data.tags.join(',') : (data.tags || '');
       const ratingVal = data.rating !== undefined && data.rating !== null ? data.rating : '';
-      const favoritoVal = data.favorito === true ? 'TRUE' : 'FALSE';
+      const favoritoVal = (data.favorito === true || data.favorito === 'TRUE' || data.favorito === 'true') ? 'TRUE' : 'FALSE';
 
       const rowValues = [
         latStr,
@@ -419,19 +447,21 @@ function handleRequest(e) {
       if (action === "create") {
         const newId = data.id || ("ID-" + Math.random().toString(36).substr(2, 9).toUpperCase());
         sheet.appendRow([newId, ...rowValues]);
-        return response({status: "success", id: newId});
+        return response({status: "success", action: "create", id: newId});
       
       } else if (action === "update") {
         const rows = sheet.getDataRange().getValues();
         const idBusqueda = data.id ? data.id.toString().trim() : "";
         for (let i = 1; i < rows.length; i++) {
           if (rows[i][0] && rows[i][0].toString().trim() === idBusqueda) {
-            // Actualizar desde columna B hasta la última columna de datos
             sheet.getRange(i + 1, 2, 1, rowValues.length).setValues([rowValues]);
-            return response({status: "success", id: idBusqueda});
+            return response({status: "success", action: "update", id: idBusqueda});
           }
         }
-        return response({status: "error", message: "ID no encontrado"});
+        // Fallback: si no existía el ID, añadirlo como nueva fila para garantizar no perder datos
+        const finalId = idBusqueda || ("ID-" + Math.random().toString(36).substr(2, 9).toUpperCase());
+        sheet.appendRow([finalId, ...rowValues]);
+        return response({status: "success", action: "created_on_update_fallback", id: finalId});
 
       } else if (action === "delete") {
         const rows = sheet.getDataRange().getValues();
@@ -439,49 +469,49 @@ function handleRequest(e) {
         for (let i = 1; i < rows.length; i++) {
           if (rows[i][0] && rows[i][0].toString().trim() === idBusqueda) {
             sheet.deleteRow(i + 1);
-            return response({status: "success"});
+            return response({status: "success", action: "delete", id: idBusqueda});
           }
         }
-        return response({status: "error", message: "ID no encontrado para eliminar"});
+        return response({status: "success", action: "delete", message: "ID no encontrado o ya eliminado"});
       }
-    } else {
-      // LECTURA DE DATOS (Compatible con hojas antiguas y nuevas)
-      const dataRange = sheet.getDataRange();
-      const data = dataRange.getValues();
-      if (data.length <= 1) {
-        return response([]);
-      }
-      data.shift(); // Quitar cabecera
-      
-      const result = data.map(row => {
-        const latParsed = parseFloat((row[1] || '0').toString().replace(',', '.'));
-        const lngParsed = parseFloat((row[2] || '0').toString().replace(',', '.'));
-        const tagsRaw = row[13] || '';
-        const tagsArr = typeof tagsRaw === 'string' ? tagsRaw.split(',').map(t => t.trim()).filter(Boolean) : [];
-
-        return {
-          id: (row[0] || '').toString(),
-          lat: isNaN(latParsed) ? 0 : latParsed,
-          lng: isNaN(lngParsed) ? 0 : lngParsed,
-          nombre: (row[3] || '').toString(),
-          descripcion: (row[4] || '').toString(),
-          categoria: (row[5] || 'Otro').toString(),
-          ciudad: (row[6] || '').toString(),
-          rating: row[7] !== undefined && row[7] !== '' ? parseFloat(row[7]) : undefined,
-          direccion: (row[8] || '').toString(),
-          telefono: (row[9] || '').toString(),
-          web: (row[10] || '').toString(),
-          horario: (row[11] || '').toString(),
-          precio: (row[12] || '').toString(),
-          tags: tagsArr,
-          foto_url: (row[14] || '').toString(),
-          favorito: row[15] === true || (row[15] || '').toString().toUpperCase() === 'TRUE',
-          notas_privadas: (row[16] || '').toString(),
-          estado: (row[17] || 'Pendiente').toString()
-        };
-      });
-      return response(result);
     }
+
+    // ACCIÓN POR DEFECTO: LECTURA DE DATOS
+    const dataRange = sheet.getDataRange();
+    const sheetData = dataRange.getValues();
+    if (sheetData.length <= 1) {
+      return response([]);
+    }
+    sheetData.shift(); // Quitar cabecera
+    
+    const result = sheetData.map(row => {
+      const latParsed = parseFloat((row[1] || '0').toString().replace(',', '.'));
+      const lngParsed = parseFloat((row[2] || '0').toString().replace(',', '.'));
+      const tagsRaw = row[13] || '';
+      const tagsArr = typeof tagsRaw === 'string' ? tagsRaw.split(',').map(t => t.trim()).filter(Boolean) : [];
+
+      return {
+        id: (row[0] || '').toString(),
+        lat: isNaN(latParsed) ? 0 : latParsed,
+        lng: isNaN(lngParsed) ? 0 : lngParsed,
+        nombre: (row[3] || '').toString(),
+        descripcion: (row[4] || '').toString(),
+        categoria: (row[5] || 'Otro').toString(),
+        ciudad: (row[6] || '').toString(),
+        rating: row[7] !== undefined && row[7] !== '' ? parseFloat(row[7]) : undefined,
+        direccion: (row[8] || '').toString(),
+        telefono: (row[9] || '').toString(),
+        web: (row[10] || '').toString(),
+        horario: (row[11] || '').toString(),
+        precio: (row[12] || '').toString(),
+        tags: tagsArr,
+        foto_url: (row[14] || '').toString(),
+        favorito: row[15] === true || (row[15] || '').toString().toUpperCase() === 'TRUE',
+        notas_privadas: (row[16] || '').toString(),
+        estado: (row[17] || 'Pendiente').toString()
+      };
+    });
+    return response(result);
   } catch (error) {
     return response({status: "error", message: error.toString()});
   } finally {
@@ -503,7 +533,7 @@ function generarIdsFaltantes() {
       }
     }
   } catch(e) {
-    // Ignorar si no hay permisos
+    // Silencioso
   }
 }
 
