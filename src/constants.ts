@@ -1,7 +1,7 @@
 import { CategoryMeta, POICategory, POI, VisitStatus } from './types';
 
 export const DEFAULT_SCRIPT_URL =
-  'https://script.google.com/macros/s/AKfycbx2lzGsngRn9jK3r0clhms4so0PUhJ8JplJPToMk1fckb02x-ff2TGUzrR7RiXLmovtdA/exec';
+  'https://script.google.com/macros/s/AKfycbyv878lm3_5t-salO8s4q8xPRhVkav2cw1dCgTx9ZCpjEnXClZzZ05uZYJ_tLCoUfDQ/exec';
 
 export const CATEGORIES_CONFIG: Record<string, CategoryMeta> = {
   Restaurante: {
