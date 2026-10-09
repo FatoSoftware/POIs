@@ -124,10 +124,10 @@ Elige el método que te resulte más cómodo:
 ### MÉTODO B: Conexión Automática con GitHub
 Si tienes tu código subido a GitHub:
 1. En el panel de Cloudflare, ve a **Workers y Pages** > **Crear** > pestaña **Pages** > **Conectar a Git**.
-2. Conecta tu cuenta de GitHub y elige tu repositorio.
+2. Conecta tu cuenta de GitHub y elige tu repositorio (`POIs`).
 3. En la pantalla de configuración:
    - **Preajuste de compilación (Framework preset):** `Vite`
-   - **Comando de compilación (Build command):** `npm run build`
+   - **Comando de compilación (Build command):** `npm run build` (o `npm run build:pages`)
    - **Directorio de salida de la compilación (Build output directory):** `dist`
 4. *(Opcional)* En **Variables de entorno (Environment variables)**, puedes agregar:
    - `VITE_AIRTABLE_PERSONAL_ACCESS_TOKEN` = tu token `pat...`
@@ -135,6 +135,9 @@ Si tienes tu código subido a GitHub:
    - `VITE_AIRTABLE_TABLE_NAME` = `POIs`
 5. Haz clic en **Guardar e implementar** (Save and Deploy).
 6. Cada vez que hagas un cambio en GitHub, Cloudflare actualizará tu webapp automáticamente en cuestión de segundos.
+
+> 💡 **Nota sobre el error de `bun install` solucionado:**
+> Si Cloudflare intentaba ejecutar `bun install --frozen-lockfile` y fallaba con `error: Unknown lockfile version at bun.lock`, el motivo era la presencia del archivo `bun.lock` con una versión no soportada por el entorno de Cloudflare. Se ha eliminado `bun.lock` para que Cloudflare Pages utilice el gestor estándar `npm` (`npm install` / `npm ci` con `package-lock.json`), lo que garantiza una compilación limpia y 100% exitosa.
 
 ---
 
