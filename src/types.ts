@@ -43,6 +43,7 @@ export interface NavigationInfo {
 
 export interface POI {
   id: string;
+  airtableRecordId?: string;
   lat: number;
   lng: number;
   nombre: string;

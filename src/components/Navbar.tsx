@@ -71,7 +71,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
                     : 'bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
                 }`}
-                title={syncSource === 'live' ? 'Sincronizado con Google Sheets' : 'Modo local / guardado en el dispositivo'}
+                title={syncSource === 'live' ? 'Sincronizado con Airtable' : 'Modo local / guardado en el dispositivo'}
               >
                 <span
                   className={`w-1.5 h-1.5 rounded-full ${
@@ -79,7 +79,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   } ${isSyncing ? 'animate-ping' : ''}`}
                 />
                 <span className="hidden xs:inline">
-                  {syncSource === 'live' ? 'Sheets Live' : 'Local'}
+                  {syncSource === 'live' ? 'Airtable Live' : 'Local'}
                 </span>
               </span>
 
@@ -90,7 +90,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   onClick={onSyncPending}
                   disabled={isSyncing}
                   className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500 hover:bg-amber-600 text-white flex items-center gap-1 animate-pulse transition-all cursor-pointer shrink-0 shadow-xs"
-                  title="Hay cambios pendientes de subir a Sheets. Pulsa para sincronizar ahora."
+                  title="Hay cambios pendientes de subir a Airtable. Pulsa para sincronizar ahora."
                 >
                   <CloudUpload className="w-3 h-3" />
                   <span>Subir ({pendingCount})</span>

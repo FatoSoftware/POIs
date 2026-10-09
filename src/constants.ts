@@ -1,7 +1,7 @@
 import { CategoryMeta, POICategory, POI, VisitStatus } from './types';
 
-export const DEFAULT_SCRIPT_URL =
-  'https://script.google.com/macros/s/AKfycbyv878lm3_5t-salO8s4q8xPRhVkav2cw1dCgTx9ZCpjEnXClZzZ05uZYJ_tLCoUfDQ/exec';
+export const DEFAULT_AIRTABLE_TABLE = 'POIs';
+export const DEFAULT_SCRIPT_URL = '';
 
 export const CATEGORIES_CONFIG: Record<string, CategoryMeta> = {
   Restaurante: {

@@ -1,6 +1,6 @@
 {
   "name": "Gestor de POIs - Mis Viajes",
-  "description": "Gestor moderno de Puntos de Interés (POIs) sincronizado con Google Sheets, con mapa interactivo, filtros avanzados y campos detallados.",
+  "description": "Gestor moderno de Puntos de Interés (POIs) con base de datos en Airtable, mapa interactivo, filtros avanzados y preparado para Cloudflare Pages.",
   "requestFramePermissions": ["geolocation"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
