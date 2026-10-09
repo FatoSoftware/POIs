@@ -1,40 +1,37 @@
 import React, { useState, useEffect } from 'react';
 import { POI } from '../types';
 import {
-  getAirtableConfig,
-  setAirtableConfig,
-  testAirtableConnection,
-  batchUploadPOIsToAirtable,
+  DEFAULT_SCRIPT_URL,
+  MODERN_APPS_SCRIPT_CODE,
+} from '../constants';
+import {
+  getStoredScriptUrl,
+  setStoredScriptUrl,
+  testSheetsConnection,
+  forceBatchSyncAllToSheet,
   getPendingSyncCount,
   syncPendingQueue,
   saveCachedPOIs,
-  AIRTABLE_PERSONAL_ACCESS_TOKEN,
-  AIRTABLE_BASE_ID,
-  AIRTABLE_TABLE_NAME,
 } from '../services/api';
 import {
   X,
   Settings,
-  Database,
-  Download,
-  Upload,
+  Link,
+  Code2,
+  Copy,
+  Check,
+  RotateCcw,
   CheckCircle2,
   AlertCircle,
-  RefreshCw,
-  CloudUpload,
-  ExternalLink,
-  Eye,
-  EyeOff,
-  Table,
+  Download,
+  Upload,
+  Database,
   Globe,
-  FileSpreadsheet,
-  Check,
-  Copy,
+  GitBranch,
+  CloudUpload,
+  RefreshCw,
   Info,
-  HelpCircle,
-  Key,
-  Layers,
-  BookOpen,
+  ShieldCheck,
 } from 'lucide-react';
 
 interface SettingsModalProps {
@@ -52,66 +49,51 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onDataImported,
   onReload,
 }) => {
-  const [token, setToken] = useState('');
-  const [baseId, setBaseId] = useState('');
-  const [tableName, setTableName] = useState('POIs');
-  const [showToken, setShowToken] = useState(false);
-
+  const [url, setUrl] = useState(getStoredScriptUrl());
+  const [copiedCode, setCopiedCode] = useState(false);
+  const [copiedActionCode, setCopiedActionCode] = useState(false);
   const [testingStatus, setTestingStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
   const [testResultMsg, setTestResultMsg] = useState<string | null>(null);
-
   const [syncingAllStatus, setSyncingAllStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
   const [syncResultMsg, setSyncResultMsg] = useState<string | null>(null);
-
   const [pendingCount, setPendingCount] = useState<number>(0);
-  const [copiedIndex, setCopiedIndex] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'airtable' | 'schema' | 'cloudflare' | 'backup'>('airtable');
+  const [activeTab, setActiveTab] = useState<'connection' | 'code' | 'backup' | 'github'>('connection');
 
   useEffect(() => {
     if (isOpen) {
-      const cfg = getAirtableConfig();
-      setToken(cfg.token);
-      setBaseId(cfg.baseId);
-      setTableName(cfg.tableName || 'POIs');
+      setUrl(getStoredScriptUrl());
       setPendingCount(getPendingSyncCount());
-      setTestingStatus('idle');
-      setTestResultMsg(null);
-      setSyncingAllStatus('idle');
-      setSyncResultMsg(null);
     }
   }, [isOpen]);
 
   if (!isOpen) return null;
 
-  const handleSaveConfig = () => {
-    setAirtableConfig({
-      token,
-      baseId,
-      tableName,
-    });
+  const handleSaveUrl = () => {
+    setStoredScriptUrl(url);
     onReload();
     onClose();
+  };
+
+  const handleResetUrl = () => {
+    setUrl(DEFAULT_SCRIPT_URL);
+    setStoredScriptUrl(DEFAULT_SCRIPT_URL);
   };
 
   const handleTestConnection = async () => {
     setTestingStatus('testing');
     setTestResultMsg(null);
     try {
-      const res = await testAirtableConnection({
-        token,
-        baseId,
-        tableName,
-      });
+      const res = await testSheetsConnection(url);
       if (res.success) {
         setTestingStatus('success');
         setTestResultMsg(res.message);
       } else {
         setTestingStatus('error');
-        setTestResultMsg(res.error || res.message);
+        setTestResultMsg(res.error || res.message || 'No se pudo conectar en directo. Verifica los permisos de la aplicación web.');
       }
     } catch (e: any) {
       setTestingStatus('error');
-      setTestResultMsg(e.message || 'Error de conexión con Airtable');
+      setTestResultMsg(e.message || 'Error de conexión.');
     }
   };
 
@@ -119,27 +101,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setSyncingAllStatus('syncing');
     setSyncResultMsg(null);
     try {
-      // Guardar primero configuración
-      setAirtableConfig({ token, baseId, tableName });
-
-      const res = await batchUploadPOIsToAirtable(allPOIs, {
-        token,
-        baseId,
-        tableName,
-      });
-
+      const res = await forceBatchSyncAllToSheet(allPOIs, url);
       if (res.success) {
         setSyncingAllStatus('success');
-        setSyncResultMsg(`¡Éxito! Se han subido y migrado ${res.count} POIs a tu base de Airtable.`);
+        setSyncResultMsg(`¡Éxito! Se han subido y actualizado ${res.count} POIs en tu Google Sheet.`);
         setPendingCount(0);
         onReload();
       } else {
         setSyncingAllStatus('error');
-        setSyncResultMsg(res.error || 'Error al subir a Airtable.');
+        setSyncResultMsg(res.error || 'Error al sincronizar con Google Sheets.');
       }
     } catch (e: any) {
       setSyncingAllStatus('error');
-      setSyncResultMsg(e.message || 'Error durante la subida masiva a Airtable.');
+      setSyncResultMsg(e.message || 'Error durante la sincronización.');
     }
   };
 
@@ -147,14 +121,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setSyncingAllStatus('syncing');
     setSyncResultMsg(null);
     try {
-      const res = await syncPendingQueue({ token, baseId, tableName });
+      const res = await syncPendingQueue(url);
       setPendingCount(res.remainingCount);
       if (res.remainingCount === 0) {
         setSyncingAllStatus('success');
-        setSyncResultMsg(`Se han sincronizado los ${res.syncedCount} cambios pendientes en Airtable.`);
+        setSyncResultMsg(`Se han sincronizado los ${res.syncedCount} cambios pendientes.`);
       } else {
         setSyncingAllStatus('error');
-        setSyncResultMsg(`Se sincronizaron ${res.syncedCount} cambios, quedan ${res.remainingCount} pendientes.`);
+        setSyncResultMsg(`Se sincronizaron ${res.syncedCount} cambios, pero ${res.remainingCount} siguen pendientes.`);
       }
       onReload();
     } catch (e: any) {
@@ -163,10 +137,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
-  const handleCopyText = (text: string, id: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedIndex(id);
-    setTimeout(() => setCopiedIndex(null), 2000);
+  const handleCopyAppsScript = () => {
+    navigator.clipboard.writeText(MODERN_APPS_SCRIPT_CODE);
+    setCopiedCode(true);
+    setTimeout(() => setCopiedCode(false), 2500);
   };
 
   const handleExportJSON = () => {
@@ -174,58 +148,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     const downloadAnchor = document.createElement('a');
     downloadAnchor.setAttribute('href', dataStr);
     downloadAnchor.setAttribute('download', `mis_pois_backup_${new Date().toISOString().slice(0, 10)}.json`);
-    document.body.appendChild(downloadAnchor);
-    downloadAnchor.click();
-    downloadAnchor.remove();
-  };
-
-  const handleExportCSV = () => {
-    const headers = [
-      'ID',
-      'Nombre',
-      'Lat',
-      'Lng',
-      'Categoria',
-      'Ciudad',
-      'Descripcion',
-      'Rating',
-      'Direccion',
-      'Telefono',
-      'Web',
-      'Horario',
-      'Precio',
-      'Tags',
-      'Foto_URL',
-      'Favorito',
-      'Notas_Privadas',
-      'Estado',
-    ];
-
-    const rows = allPOIs.map((p) => [
-      `"${(p.id || '').replace(/"/g, '""')}"`,
-      `"${(p.nombre || '').replace(/"/g, '""')}"`,
-      p.lat || 0,
-      p.lng || 0,
-      `"${(p.categoria || '').replace(/"/g, '""')}"`,
-      `"${(p.ciudad || '').replace(/"/g, '""')}"`,
-      `"${(p.descripcion || '').replace(/"/g, '""')}"`,
-      p.rating !== undefined ? p.rating : '',
-      `"${(p.direccion || '').replace(/"/g, '""')}"`,
-      `"${(p.telefono || '').replace(/"/g, '""')}"`,
-      `"${(p.web || '').replace(/"/g, '""')}"`,
-      `"${(p.horario || '').replace(/"/g, '""')}"`,
-      `"${(p.precio || '').replace(/"/g, '""')}"`,
-      `"${(Array.isArray(p.tags) ? p.tags.join(', ') : p.tags || '').replace(/"/g, '""')}"`,
-      `"${(p.foto_url || '').replace(/"/g, '""')}"`,
-      p.favorito ? 'true' : 'false',
-      `"${(p.notas_privadas || '').replace(/"/g, '""')}"`,
-      `"${(p.estado || 'Pendiente').replace(/"/g, '""')}"`,
-    ]);
-
-    const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
-    const downloadAnchor = document.createElement('a');
-    downloadAnchor.setAttribute('href', encodeURI(csvContent));
-    downloadAnchor.setAttribute('download', `mis_pois_airtable_ready_${new Date().toISOString().slice(0, 10)}.csv`);
     document.body.appendChild(downloadAnchor);
     downloadAnchor.click();
     downloadAnchor.remove();
@@ -253,47 +175,26 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     reader.readAsText(file);
   };
 
-  const schemaColumns = [
-    { name: 'ID', type: 'Single line text', desc: 'Identificador único (ej: ID-EX1001)' },
-    { name: 'Nombre', type: 'Single line text', desc: 'Nombre del punto de interés' },
-    { name: 'Lat', type: 'Number (Decimal 6)', desc: 'Latitud geográfica (ej: 40.415363)' },
-    { name: 'Lng', type: 'Number (Decimal 6)', desc: 'Longitud geográfica (ej: -3.707398)' },
-    { name: 'Categoria', type: 'Single line text o Single select', desc: 'Comida, Turismo, Copas, Hotel, etc.' },
-    { name: 'Ciudad', type: 'Single line text', desc: 'Ciudad o municipio (ej: Madrid, Barcelona)' },
-    { name: 'Descripcion', type: 'Long text', desc: 'Descripción o detalles del lugar' },
-    { name: 'Rating', type: 'Number (Decimal 1)', desc: 'Puntuación de 0 a 5' },
-    { name: 'Direccion', type: 'Single line text', desc: 'Dirección física completa' },
-    { name: 'Telefono', type: 'Phone number o Single line text', desc: 'Teléfono de contacto' },
-    { name: 'Web', type: 'URL', desc: 'Página web o enlace oficial' },
-    { name: 'Horario', type: 'Single line text', desc: 'Horario comercial o de visitas' },
-    { name: 'Precio', type: 'Single line text', desc: 'Gratis, €, €€, €€€, €€€€' },
-    { name: 'Tags', type: 'Single line text o Long text', desc: 'Etiquetas separadas por comas' },
-    { name: 'Foto_URL', type: 'URL o Single line text', desc: 'Enlace web directo a una foto' },
-    { name: 'Favorito', type: 'Checkbox', desc: 'Marcado si es favorito' },
-    { name: 'Notas_Privadas', type: 'Long text', desc: 'Notas personales y recomendaciones' },
-    { name: 'Estado', type: 'Single line text o Single select', desc: 'Pendiente, Visitado, Imprescindible' },
-  ];
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/50 backdrop-blur-xs animate-in fade-in duration-200">
       <div
-        className="bg-white rounded-3xl shadow-2xl border border-slate-200/90 w-full max-w-2xl max-h-[92vh] overflow-hidden flex flex-col animate-in zoom-in-95 duration-200"
+        className="bg-white rounded-3xl shadow-2xl border border-slate-200/80 w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col animate-in zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="px-5 py-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-xl bg-teal-50 border border-teal-200 text-teal-600 flex items-center justify-center">
-              <Database className="w-5 h-5" />
+              <Settings className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-bold text-base text-slate-800">Base de Datos Airtable & Cloudflare</h3>
-              <p className="text-xs text-slate-500">API nativa Fetch (100% estático, sin Google Apps Script)</p>
+              <h3 className="font-bold text-base text-slate-800">Conexión Bidireccional con Google Sheets</h3>
+              <p className="text-xs text-slate-500">Sincronización multi-dispositivo y backend Apps Script</p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="w-8 h-8 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-200 flex items-center justify-center transition-colors cursor-pointer"
+            className="w-8 h-8 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-200 flex items-center justify-center transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
@@ -303,212 +204,90 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         <div className="flex border-b border-slate-200 bg-white px-4 shrink-0 overflow-x-auto">
           <button
             type="button"
-            onClick={() => setActiveTab('airtable')}
-            className={`py-2.5 px-3 text-xs font-semibold border-b-2 transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
-              activeTab === 'airtable'
+            onClick={() => setActiveTab('connection')}
+            className={`py-2.5 px-3 text-xs font-semibold border-b-2 transition-all flex items-center gap-1.5 whitespace-nowrap ${
+              activeTab === 'connection'
                 ? 'border-teal-500 text-teal-700'
                 : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
-            <Key className="w-3.5 h-3.5" />
-            <span>Credenciales Airtable</span>
+            <Link className="w-3.5 h-3.5" />
+            <span>Enlace y Sincronización</span>
           </button>
 
           <button
             type="button"
-            onClick={() => setActiveTab('schema')}
-            className={`py-2.5 px-3 text-xs font-semibold border-b-2 transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
-              activeTab === 'schema'
+            onClick={() => setActiveTab('code')}
+            className={`py-2.5 px-3 text-xs font-semibold border-b-2 transition-all flex items-center gap-1.5 whitespace-nowrap ${
+              activeTab === 'code'
                 ? 'border-teal-500 text-teal-700'
                 : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
-            <Table className="w-3.5 h-3.5" />
-            <span>Columnas Airtable</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab('cloudflare')}
-            className={`py-2.5 px-3 text-xs font-semibold border-b-2 transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
-              activeTab === 'cloudflare'
-                ? 'border-teal-500 text-teal-700'
-                : 'border-transparent text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            <Globe className="w-3.5 h-3.5 text-teal-600" />
-            <span>Guía Cloudflare Pages</span>
+            <Code2 className="w-3.5 h-3.5" />
+            <span>Código Apps Script (Requerido)</span>
           </button>
 
           <button
             type="button"
             onClick={() => setActiveTab('backup')}
-            className={`py-2.5 px-3 text-xs font-semibold border-b-2 transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
+            className={`py-2.5 px-3 text-xs font-semibold border-b-2 transition-all flex items-center gap-1.5 whitespace-nowrap ${
               activeTab === 'backup'
                 ? 'border-teal-500 text-teal-700'
                 : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
-            <FileSpreadsheet className="w-3.5 h-3.5" />
-            <span>Copia / Exportar CSV</span>
+            <Database className="w-3.5 h-3.5" />
+            <span>Copia de Seguridad</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('github')}
+            className={`py-2.5 px-3 text-xs font-semibold border-b-2 transition-all flex items-center gap-1.5 whitespace-nowrap ${
+              activeTab === 'github'
+                ? 'border-teal-500 text-teal-700'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <Globe className="w-3.5 h-3.5 text-teal-600" />
+            <span>GitHub Pages</span>
           </button>
         </div>
 
         {/* Modal Body */}
         <div className="p-4 sm:p-6 overflow-y-auto flex-1 space-y-4">
-          {/* TAB 1: AIRTABLE CREDENTIALS */}
-          {activeTab === 'airtable' && (
+          {/* TAB 1: CONNECTION */}
+          {activeTab === 'connection' && (
             <div className="space-y-4">
+              {/* Info banner explaining multi-device sync */}
               <div className="p-3.5 bg-teal-50/70 border border-teal-200/80 rounded-2xl text-xs text-teal-900 leading-relaxed">
                 <p className="font-semibold mb-1 flex items-center gap-1.5">
-                  <CheckCircle2 className="w-4 h-4 text-teal-600" />
-                  Arquitectura 100% Estática con API de Airtable
+                  <ShieldCheck className="w-4 h-4 text-teal-600" />
+                  Sincronización Multi-Dispositivo con Google Sheets
                 </p>
                 <p>
-                  Tu aplicación se comunica directamente desde el navegador web mediante <code>fetch</code> nativo con la API de Airtable.
-                  No necesitas Google Sheets, Google Apps Script ni servidores Node intermedios.
+                  Cualquier POI creado o editado desde el móvil o el ordenador se actualiza directamente en la hoja de cálculo.
+                  Si modificaste POIs en el teléfono y aún no los ves en Sheets, pulsa el botón de <strong>"Subir todos los POIs locales a Sheets"</strong> a continuación.
                 </p>
               </div>
 
-              {/* Pending changes alert */}
+              {/* Pending changes alert if any */}
               {pendingCount > 0 && (
                 <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl flex items-center justify-between gap-3 text-xs text-amber-900">
                   <div className="flex items-center gap-2">
                     <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
-                    <span>Tienes <strong>{pendingCount} cambios pendientes</strong> de subir a Airtable.</span>
+                    <span>Tienes <strong>{pendingCount} cambios pendientes</strong> de sincronizar en este dispositivo.</span>
                   </div>
                   <button
                     type="button"
                     onClick={handleFlushPending}
                     disabled={syncingAllStatus === 'syncing'}
-                    className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-semibold transition-colors shrink-0 flex items-center gap-1 cursor-pointer"
+                    className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-semibold transition-colors shrink-0 flex items-center gap-1"
                   >
                     <RefreshCw className={`w-3 h-3 ${syncingAllStatus === 'syncing' ? 'animate-spin' : ''}`} />
                     <span>Sincronizar ahora</span>
                   </button>
-                </div>
-              )}
-
-              {/* Inputs */}
-              <div className="space-y-3.5">
-                {/* 1. PAT */}
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-xs font-bold text-slate-700 flex items-center gap-1">
-                      <span>AIRTABLE_PERSONAL_ACCESS_TOKEN</span>
-                      <span className="text-red-500">*</span>
-                    </label>
-                    <a
-                      href="https://airtable.com/create/tokens"
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-[11px] text-teal-600 hover:text-teal-700 font-semibold flex items-center gap-1"
-                    >
-                      <span>Crear Token en Airtable</span>
-                      <ExternalLink className="w-3 h-3" />
-                    </a>
-                  </div>
-                  <div className="relative">
-                    <input
-                      type={showToken ? 'text' : 'password'}
-                      value={token}
-                      onChange={(e) => setToken(e.target.value)}
-                      placeholder="patxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-                      className="w-full text-xs font-mono p-2.5 pr-10 border border-slate-300 rounded-xl focus:ring-2 focus:ring-teal-500 focus:outline-none"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowToken(!showToken)}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
-                    >
-                      {showToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                  <p className="text-[10px] text-slate-500 mt-1">
-                    En Airtable: dale permisos de lectura y escritura (<code>data.records:read</code>, <code>data.records:write</code>) y acceso a tu Base.
-                  </p>
-                </div>
-
-                {/* 2. BASE ID */}
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-xs font-bold text-slate-700 flex items-center gap-1">
-                      <span>AIRTABLE_BASE_ID</span>
-                      <span className="text-red-500">*</span>
-                    </label>
-                    <span className="text-[10px] text-slate-400 font-mono">Empieza por "app..."</span>
-                  </div>
-                  <input
-                    type="text"
-                    value={baseId}
-                    onChange={(e) => setBaseId(e.target.value)}
-                    placeholder="appxxxxxxxxxxxxxx"
-                    className="w-full text-xs font-mono p-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-teal-500 focus:outline-none"
-                  />
-                  <p className="text-[10px] text-slate-500 mt-1">
-                    Lo verás en la URL de tu base en el navegador: <code>airtable.com/appXXXXXXXXXXXXXX/...</code> o en la documentación de la API.
-                  </p>
-                </div>
-
-                {/* 3. TABLE NAME */}
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-xs font-bold text-slate-700 flex items-center gap-1">
-                      <span>AIRTABLE_TABLE_NAME</span>
-                    </label>
-                    <span className="text-[10px] text-slate-400">Por defecto: "POIs"</span>
-                  </div>
-                  <input
-                    type="text"
-                    value={tableName}
-                    onChange={(e) => setTableName(e.target.value)}
-                    placeholder="POIs"
-                    className="w-full text-xs font-mono p-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-teal-500 focus:outline-none"
-                  />
-                  <p className="text-[10px] text-slate-500 mt-1">
-                    Debe coincidir exactamente con el nombre de la pestaña/tabla en tu base de Airtable.
-                  </p>
-                </div>
-              </div>
-
-              {/* Action Buttons: Save & Test */}
-              <div className="pt-2 flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleSaveConfig}
-                  className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold rounded-xl transition-colors shadow-xs cursor-pointer"
-                >
-                  Guardar Credenciales
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleTestConnection}
-                  disabled={testingStatus === 'testing' || !token || !baseId}
-                  className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${testingStatus === 'testing' ? 'animate-spin' : ''}`} />
-                  <span>Probar Conexión en Directo</span>
-                </button>
-              </div>
-
-              {/* Test Connection Output */}
-              {testingStatus !== 'idle' && (
-                <div
-                  className={`p-3 rounded-xl border text-xs flex items-start gap-2.5 animate-in fade-in ${
-                    testingStatus === 'success'
-                      ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-                      : testingStatus === 'error'
-                      ? 'bg-red-50 border-red-200 text-red-800'
-                      : 'bg-slate-50 border-slate-200 text-slate-700'
-                  }`}
-                >
-                  {testingStatus === 'success' && <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />}
-                  {testingStatus === 'error' && <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />}
-                  {testingStatus === 'testing' && <RefreshCw className="w-4 h-4 animate-spin text-slate-600 shrink-0 mt-0.5" />}
-                  <div>
-                    <p className="font-semibold">{testingStatus === 'testing' ? 'Verificando API de Airtable...' : testResultMsg}</p>
-                  </div>
                 </div>
               )}
 
@@ -518,253 +297,300 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <div className="flex items-center gap-2">
                     <CloudUpload className="w-4 h-4 text-teal-400" />
                     <h4 className="text-xs font-bold uppercase tracking-wider text-slate-100">
-                      Migración / Subida Masiva a Airtable
+                      Sincronización Total a Sheets (Batch Upload)
                     </h4>
                   </div>
-                  <span className="text-[11px] font-mono bg-slate-800 px-2 py-0.5 rounded text-teal-300">
+                  <span className="text-[11px] bg-slate-800 text-teal-300 font-mono px-2 py-0.5 rounded-full border border-slate-700">
                     {allPOIs.length} POIs disponibles
                   </span>
                 </div>
-                <p className="text-xs text-slate-300 leading-relaxed">
-                  ¿Quieres cargar todos los POIs actuales en tu nueva tabla de Airtable? Este proceso los enviará en lotes de 10 directamente con la API oficial.
+                <p className="text-xs text-slate-300">
+                  Envía todos los POIs actuales con todas sus modificaciones a tu Google Sheet en un único lote rápido.
                 </p>
-                <div className="pt-1 flex items-center gap-3">
+                <div className="pt-1">
                   <button
                     type="button"
                     onClick={handleForceUploadAll}
-                    disabled={syncingAllStatus === 'syncing' || !token || !baseId}
-                    className="px-4 py-2 bg-teal-500 hover:bg-teal-400 text-slate-950 font-bold text-xs rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                    disabled={syncingAllStatus === 'syncing'}
+                    className="px-4 py-2 bg-teal-500 hover:bg-teal-400 text-slate-950 font-bold rounded-xl text-xs transition-all flex items-center gap-2 cursor-pointer shadow-md disabled:opacity-50"
                   >
-                    <Upload className={`w-3.5 h-3.5 ${syncingAllStatus === 'syncing' ? 'animate-bounce' : ''}`} />
-                    <span>Subir todos los POIs a Airtable</span>
+                    <RefreshCw className={`w-3.5 h-3.5 ${syncingAllStatus === 'syncing' ? 'animate-spin' : ''}`} />
+                    <span>{syncingAllStatus === 'syncing' ? 'Subiendo a Google Sheets...' : `Subir y Actualizar los ${allPOIs.length} POIs en Sheets`}</span>
                   </button>
-                  {syncingAllStatus === 'syncing' && (
-                    <span className="text-xs text-teal-300 flex items-center gap-1">
-                      <RefreshCw className="w-3 h-3 animate-spin" /> Subiendo registros...
-                    </span>
-                  )}
                 </div>
 
                 {syncResultMsg && (
-                  <p className={`text-xs p-2 rounded-lg ${syncingAllStatus === 'success' ? 'bg-emerald-950/80 text-emerald-300' : 'bg-red-950/80 text-red-300'}`}>
-                    {syncResultMsg}
-                  </p>
+                  <div
+                    className={`mt-2 p-2.5 rounded-xl border text-xs flex items-center gap-2 ${
+                      syncingAllStatus === 'success'
+                        ? 'bg-emerald-950/80 border-emerald-500/50 text-emerald-200'
+                        : 'bg-rose-950/80 border-rose-500/50 text-rose-200'
+                    }`}
+                  >
+                    {syncingAllStatus === 'success' ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    ) : (
+                      <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                    )}
+                    <span>{syncResultMsg}</span>
+                  </div>
                 )}
               </div>
-            </div>
-          )}
 
-          {/* TAB 2: SCHEMA / COLUMNS */}
-          {activeTab === 'schema' && (
-            <div className="space-y-4">
-              <div className="p-3.5 bg-blue-50 border border-blue-200 rounded-2xl text-xs text-blue-900 leading-relaxed">
-                <p className="font-semibold mb-1 flex items-center gap-1.5">
-                  <Table className="w-4 h-4 text-blue-600" />
-                  Estructura de la Tabla en Airtable (Nombre de la Tabla: "{tableName || 'POIs'}")
-                </p>
-                <p>
-                  Para que la API lea y guarde sin errores, crea en Airtable los siguientes campos con estos nombres exactos (respetando mayúsculas y minúsculas).
-                  <strong> Consejo rápido:</strong> Puedes exportar el archivo CSV desde la pestaña "Copia / Exportar CSV" e importarlo directamente en Airtable para que cree todas las columnas automáticamente.
-                </p>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  URL de Implementación Web de Google Apps Script
+                </label>
+                <input
+                  type="url"
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                  placeholder="https://script.google.com/macros/s/.../exec"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500"
+                />
               </div>
 
-              <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-xs">
-                <div className="max-h-72 overflow-y-auto">
-                  <table className="w-full text-left text-xs border-collapse">
-                    <thead className="bg-slate-100 sticky top-0 text-slate-700 font-semibold border-b border-slate-200">
-                      <tr>
-                        <th className="py-2 px-3">Columna en Airtable</th>
-                        <th className="py-2 px-3">Tipo de Campo Recomendado</th>
-                        <th className="py-2 px-3">Descripción</th>
-                        <th className="py-2 px-2 text-right">Copiar</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {schemaColumns.map((col) => (
-                        <tr key={col.name} className="hover:bg-slate-50 transition-colors">
-                          <td className="py-2 px-3 font-mono font-bold text-teal-800">{col.name}</td>
-                          <td className="py-2 px-3 text-slate-600 font-mono text-[11px]">{col.type}</td>
-                          <td className="py-2 px-3 text-slate-500 text-[11px]">{col.desc}</td>
-                          <td className="py-2 px-2 text-right">
-                            <button
-                              type="button"
-                              onClick={() => handleCopyText(col.name, col.name)}
-                              className="p-1 text-slate-400 hover:text-slate-700 rounded transition-colors"
-                              title="Copiar nombre"
-                            >
-                              {copiedIndex === col.name ? (
-                                <Check className="w-3.5 h-3.5 text-emerald-600" />
-                              ) : (
-                                <Copy className="w-3.5 h-3.5" />
-                              )}
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs">
-                <span className="text-slate-600 font-medium">¿Quieres crear la tabla con un clic?</span>
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
-                  onClick={handleExportCSV}
-                  className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-lg font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                  onClick={handleTestConnection}
+                  disabled={testingStatus === 'testing'}
+                  className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                 >
-                  <FileSpreadsheet className="w-3.5 h-3.5" />
-                  <span>Descargar Plantilla CSV</span>
+                  <Link className="w-3.5 h-3.5" />
+                  <span>{testingStatus === 'testing' ? 'Verificando...' : 'Comprobar Enlace con Sheets'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleResetUrl}
+                  className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-medium transition-colors flex items-center gap-1 cursor-pointer"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Restablecer URL por defecto</span>
                 </button>
               </div>
+
+              {testResultMsg && (
+                <div
+                  className={`p-3 rounded-xl border text-xs flex items-start gap-2 ${
+                    testingStatus === 'success'
+                      ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                      : 'bg-rose-50 border-rose-200 text-rose-800'
+                  }`}
+                >
+                  {testingStatus === 'success' ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                  )}
+                  <span>{testResultMsg}</span>
+                </div>
+              )}
             </div>
           )}
 
-          {/* TAB 3: CLOUDFLARE PAGES GUIDE */}
-          {activeTab === 'cloudflare' && (
-            <div className="space-y-4 text-xs text-slate-700 leading-relaxed">
-              <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-2xl text-amber-950">
-                <p className="font-semibold mb-1 flex items-center gap-1.5">
-                  <Globe className="w-4 h-4 text-amber-600" />
-                  Despliegue Estático en Cloudflare Pages
-                </p>
-                <p>
-                  Tu aplicación está compilada con Vite en puro HTML, JavaScript y CSS sin servidor Node permanente.
-                  Es 100% compatible con el plan gratuito de <strong>Cloudflare Pages</strong>.
-                </p>
+          {/* TAB 2: CODE */}
+          {activeTab === 'code' && (
+            <div className="space-y-3">
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl text-xs text-amber-900 flex items-start gap-2.5">
+                <Info className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-bold mb-0.5">¡Paso Crucial para Actualizar en Sheets!</p>
+                  <p className="text-amber-800 leading-relaxed">
+                    Si modificaste POIs y no se guardaron en Sheets, es porque tu script de Google Sheets debe tener habilitadas las funciones de escritura (POST/GET/Batch). Pega este código y publica una <strong>"Nueva versión"</strong> en Apps Script siguiendo los pasos abajo.
+                  </p>
+                </div>
               </div>
 
-              <div className="space-y-3">
-                <div className="p-3.5 border border-slate-200 rounded-2xl bg-white shadow-xs">
-                  <h4 className="font-bold text-slate-900 mb-1 flex items-center gap-1.5">
-                    <span className="w-5 h-5 rounded-full bg-teal-100 text-teal-800 text-[11px] flex items-center justify-center font-bold">1</span>
-                    Método Sencillo: Subida Directa (Drag & Drop)
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                    Código Apps Script Actualizado y Completo
                   </h4>
-                  <p className="text-slate-600 mb-2">
-                    Si no quieres usar Git o terminal, puedes subir la carpeta de producción compilada:
+                  <p className="text-xs text-slate-500">
+                    Soporta lectura, creación, modificación, borrado y subida masiva por lotes (Batch Sync).
                   </p>
-                  <ol className="list-decimal pl-5 space-y-1 text-slate-600">
-                    <li>Ejecuta <code>npm run build</code> (genera la carpeta <code>dist/</code>).</li>
-                    <li>Ve a <strong>Cloudflare Dashboard &gt; Workers &amp; Pages &gt; Create &gt; Pages &gt; Upload assets</strong>.</li>
-                    <li>Ponle nombre a tu proyecto y arrastra la carpeta <code>dist</code>.</li>
-                    <li>¡Listo! Tu webapp estará online con HTTPS gratuito en <code>tudominio.pages.dev</code>.</li>
-                  </ol>
                 </div>
+                <button
+                  onClick={handleCopyAppsScript}
+                  className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  {copiedCode ? <Check className="w-3.5 h-3.5 text-emerald-200" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copiedCode ? '¡Copiado!' : 'Copiar Código'}</span>
+                </button>
+              </div>
 
-                <div className="p-3.5 border border-slate-200 rounded-2xl bg-white shadow-xs">
-                  <h4 className="font-bold text-slate-900 mb-1 flex items-center gap-1.5">
-                    <span className="w-5 h-5 rounded-full bg-teal-100 text-teal-800 text-[11px] flex items-center justify-center font-bold">2</span>
-                    Método Automático: Conectar con GitHub
-                  </h4>
-                  <p className="text-slate-600 mb-2">
-                    Si tu código está en un repositorio de GitHub:
-                  </p>
-                  <ul className="space-y-1 text-slate-600">
-                    <li>• <strong>Framework preset:</strong> Vite</li>
-                    <li>• <strong>Build command:</strong> <code>npm run build</code></li>
-                    <li>• <strong>Build output directory:</strong> <code>dist</code></li>
-                  </ul>
-                </div>
+              <div className="relative">
+                <pre className="bg-slate-900 text-slate-100 p-3.5 rounded-2xl text-xs font-mono overflow-x-auto max-h-64 border border-slate-800 leading-relaxed">
+                  {MODERN_APPS_SCRIPT_CODE}
+                </pre>
+              </div>
 
-                <div className="p-3.5 border border-slate-200 rounded-2xl bg-white shadow-xs">
-                  <h4 className="font-bold text-slate-900 mb-1 flex items-center gap-1.5">
-                    <span className="w-5 h-5 rounded-full bg-teal-100 text-teal-800 text-[11px] flex items-center justify-center font-bold">3</span>
-                    Variables de Entorno en Cloudflare Pages
-                  </h4>
-                  <p className="text-slate-600 mb-1.5">
-                    Puedes preconfigurar tus credenciales de Airtable en Cloudflare Pages (en Settings &gt; Environment variables):
-                  </p>
-                  <div className="bg-slate-900 text-teal-300 p-2.5 rounded-xl font-mono text-[11px] space-y-1">
-                    <div>VITE_AIRTABLE_PERSONAL_ACCESS_TOKEN = pat...</div>
-                    <div>VITE_AIRTABLE_BASE_ID = app...</div>
-                    <div>VITE_AIRTABLE_TABLE_NAME = POIs</div>
-                  </div>
-                </div>
+              <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 text-xs text-slate-700 space-y-2">
+                <p className="font-bold text-slate-900">Pasos exactos en Google Sheets (1 minuto):</p>
+                <ol className="list-decimal list-inside space-y-1.5 text-slate-600 pl-1">
+                  <li>Abre tu hoja de Google Sheets.</li>
+                  <li>En el menú superior haz clic en <strong className="text-slate-800">Extensiones</strong> &rarr; <strong className="text-slate-800">Apps Script</strong>.</li>
+                  <li>Borra todo el contenido del archivo y <strong>pega el código copiado</strong>.</li>
+                  <li>Haz clic en el botón azul superior <strong className="text-slate-800">Implementar</strong> &rarr; <strong className="text-slate-800">Administrar implementaciones</strong> (o Nueva implementación).</li>
+                  <li>Haz clic en el icono del <strong className="text-slate-800">lápiz (Editar)</strong> &rarr; en Versión selecciona <strong className="text-teal-700 font-bold bg-teal-50 px-1.5 py-0.5 rounded border border-teal-200">Nueva versión</strong> &rarr; <strong className="text-slate-800">Implementar</strong>.</li>
+                  <li>Asegúrate de que el acceso esté en <strong className="text-slate-800">"Cualquiera"</strong> (anónimo).</li>
+                </ol>
               </div>
             </div>
           )}
 
-          {/* TAB 4: BACKUP & EXPORT */}
+          {/* TAB 3: BACKUP */}
           {activeTab === 'backup' && (
             <div className="space-y-4">
-              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs text-slate-700">
-                <p className="font-semibold mb-1 text-slate-900 flex items-center gap-1.5">
-                  <FileSpreadsheet className="w-4 h-4 text-teal-600" />
-                  Copia de Seguridad y Migración de Datos
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-2">
+                <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">Exportar Copia de Seguridad</h4>
+                <p className="text-xs text-slate-500">
+                  Descarga un archivo JSON completo con todos los POIs, sus coordenadas y campos ampliados.
                 </p>
-                <p>
-                  Descarga todos tus puntos de interés en formato CSV o JSON. Puedes usar el archivo CSV para importarlo directamente en tu nueva base de Airtable.
-                </p>
+                <button
+                  type="button"
+                  onClick={handleExportJSON}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Descargar Backup JSON ({allPOIs.length} POIs)</span>
+                </button>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="p-4 border border-slate-200 rounded-2xl bg-white flex flex-col justify-between">
-                  <div>
-                    <h5 className="font-bold text-slate-800 text-xs mb-1">Exportar CSV para Airtable</h5>
-                    <p className="text-[11px] text-slate-500 mb-3">
-                      Genera un CSV con las 17 columnas y cabeceras exactas para importar en Airtable.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleExportCSV}
-                    className="w-full py-2 px-3 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    <span>Descargar CSV ({allPOIs.length} POIs)</span>
-                  </button>
-                </div>
-
-                <div className="p-4 border border-slate-200 rounded-2xl bg-white flex flex-col justify-between">
-                  <div>
-                    <h5 className="font-bold text-slate-800 text-xs mb-1">Exportar Copia JSON</h5>
-                    <p className="text-[11px] text-slate-500 mb-3">
-                      Guarda una copia exacta completa de todos los datos y campos locales.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleExportJSON}
-                    className="w-full py-2 px-3 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    <span>Descargar JSON</span>
-                  </button>
-                </div>
-              </div>
-
-              <div className="p-4 border border-dashed border-slate-300 rounded-2xl bg-slate-50/50">
-                <h5 className="font-bold text-slate-800 text-xs mb-1">Restaurar Copia JSON</h5>
-                <p className="text-[11px] text-slate-500 mb-3">
-                  Carga un archivo de respaldo previo en formato JSON para restaurar en este navegador.
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-2">
+                <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">Importar Copia de Seguridad</h4>
+                <p className="text-xs text-slate-500">
+                  Restaura una lista de puntos de interés desde un archivo JSON previo.
                 </p>
-                <label className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-semibold cursor-pointer transition-colors shadow-xs">
+                <label className="inline-flex items-center gap-1.5 px-4 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl text-xs font-semibold transition-colors cursor-pointer">
                   <Upload className="w-3.5 h-3.5 text-teal-600" />
                   <span>Seleccionar archivo JSON</span>
-                  <input
-                    type="file"
-                    accept=".json"
-                    onChange={handleImportJSON}
-                    className="hidden"
-                  />
+                  <input type="file" accept=".json" onChange={handleImportJSON} className="hidden" />
                 </label>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 4: GITHUB PAGES */}
+          {activeTab === 'github' && (
+            <div className="space-y-4">
+              <div className="p-3.5 bg-teal-50/80 border border-teal-200 rounded-2xl text-xs text-teal-950 space-y-1.5">
+                <p className="font-bold flex items-center gap-1.5 text-teal-800">
+                  <Globe className="w-4 h-4 text-teal-600" />
+                  ¡Todo Listo para GitHub Pages!
+                </p>
+                <p className="text-slate-600 leading-relaxed">
+                  El proyecto ya está configurado con rutas relativas (<code>base: './'</code>) y un flujo automatizado de <strong>GitHub Actions</strong> en <code>.github/workflows/deploy.yml</code>.
+                </p>
+              </div>
+
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-2.5 text-xs text-slate-700">
+                <h4 className="font-bold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+                  <GitBranch className="w-4 h-4 text-slate-700" />
+                  Pasos para Publicar en GitHub Pages (2 minutos)
+                </h4>
+                <ol className="list-decimal list-inside space-y-2 text-slate-600 pl-0.5">
+                  <li>
+                    <strong className="text-slate-800">Sube el código a tu repositorio de GitHub</strong> (haciendo <code>git push</code> a la rama <code>main</code> o <code>master</code>).
+                  </li>
+                  <li>
+                    En tu repositorio en GitHub, ve a la pestaña superior <strong className="text-slate-800">Settings</strong> (Configuración) &rarr; en el menú lateral izquierdo haz clic en <strong className="text-slate-800">Pages</strong>.
+                  </li>
+                  <li>
+                    En la sección <strong className="text-slate-800">Build and deployment &gt; Source</strong>, selecciona <strong className="text-teal-700 bg-teal-50 px-2 py-0.5 rounded-md font-mono border border-teal-200">GitHub Actions</strong>.
+                  </li>
+                  <li>
+                    ¡Listo! GitHub Actions compilará la app automáticamente. En unos segundos verás el enlace público de tu aplicación: <span className="font-mono text-teal-700 bg-slate-100 px-1.5 py-0.5 rounded">https://tu-usuario.github.io/tu-repo/</span>.
+                  </li>
+                </ol>
+              </div>
+
+              <div className="p-3.5 bg-slate-900 text-slate-100 rounded-2xl text-xs space-y-2 border border-slate-800">
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-slate-400">.github/workflows/deploy.yml</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(`name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: 'pages'
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+        run: npm install
+      - name: Build static project
+        run: npm run build
+      - name: Upload GitHub Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./dist
+
+  deploy:
+    environment:
+      name: github-pages
+      url: \${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4`);
+                      setCopiedActionCode(true);
+                      setTimeout(() => setCopiedActionCode(false), 2500);
+                    }}
+                    className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-medium transition-colors flex items-center gap-1 cursor-pointer"
+                  >
+                    {copiedActionCode ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                    <span>{copiedActionCode ? 'Copiado' : 'Copiar YAML'}</span>
+                  </button>
+                </div>
+                <p className="text-slate-400 text-xs leading-relaxed">
+                  Este flujo de integración continua compila la aplicación en un paquete estático optimizado y lo despliega automáticamente con cada cambio.
+                </p>
               </div>
             </div>
           )}
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-between shrink-0">
-          <div className="text-[11px] text-slate-500 flex items-center gap-1">
-            <Info className="w-3.5 h-3.5 text-teal-600" />
-            <span>Los cambios en credenciales se guardan de inmediato.</span>
-          </div>
+        <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2 shrink-0">
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer"
+            className="px-4 py-2 text-slate-600 hover:bg-slate-100 border border-slate-200 rounded-xl text-xs sm:text-sm font-semibold transition-colors cursor-pointer"
           >
             Cerrar
+          </button>
+          <button
+            type="button"
+            onClick={handleSaveUrl}
+            className="px-5 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs sm:text-sm font-semibold transition-colors cursor-pointer"
+          >
+            Guardar y Aplicar
           </button>
         </div>
       </div>

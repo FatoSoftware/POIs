@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { POI, FilterState, AppTheme, GPSLocation, CategoryMeta } from './types';
 import {
-  fetchPOIsFromAirtable,
-  savePOIToAirtable,
-  deletePOIFromAirtable,
+  fetchPOIsFromSheet,
+  savePOIToSheet,
+  deletePOIFromSheet,
   getPendingSyncCount,
   syncPendingQueue,
 } from './services/api';
@@ -99,27 +99,27 @@ export default function App() {
     }, 3500);
   };
 
-  // Initial Load from Airtable & Automatic Merge
+  // Initial Load from Google Sheets & Automatic Merge
   const loadData = useCallback(async (silent = false) => {
     if (!silent) setIsSyncing(true);
     try {
-      const res = await fetchPOIsFromAirtable();
+      const res = await fetchPOIsFromSheet();
       setPois(res.pois);
       setSyncSource(res.source);
       setPendingCount(res.pendingCount);
       if (res.source === 'live') {
         if (!silent) {
           if (res.pendingCount > 0) {
-            showToast(`Sincronizados ${res.pois.length} POIs (${res.pendingCount} pendientes de confirmar en Airtable)`, 'info');
+            showToast(`Sincronizados ${res.pois.length} POIs (${res.pendingCount} pendientes de confirmar en Sheets)`, 'info');
           } else {
-            showToast(`Sincronizados ${res.pois.length} POIs desde Airtable`, 'success');
+            showToast(`Sincronizados ${res.pois.length} POIs desde Google Sheets`, 'success');
           }
         }
       } else if (res.error) {
-        if (!silent) showToast(`Modo local: ${res.pois.length} POIs cargados`, 'info');
+        if (!silent) showToast(`Modo guardado local: ${res.pois.length} POIs disponibles`, 'info');
       }
     } catch {
-      showToast('Error al conectar con Airtable, usando copia local', 'error');
+      showToast('Error al conectar con Google Sheets, usando copia local', 'error');
     } finally {
       setIsSyncing(false);
       setIsLoading(false);
@@ -132,13 +132,13 @@ export default function App() {
       const res = await syncPendingQueue();
       setPendingCount(res.remainingCount);
       if (res.remainingCount === 0) {
-        showToast(`¡Sincronización completa! Se subieron ${res.syncedCount} cambios a Airtable.`, 'success');
+        showToast(`¡Sincronización completa! Se subieron ${res.syncedCount} cambios a Sheets.`, 'success');
       } else {
         showToast(`Sincronizados ${res.syncedCount} cambios. Quedan ${res.remainingCount} pendientes.`, 'info');
       }
       loadData(true);
     } catch {
-      showToast('Error al conectar con Airtable.', 'error');
+      showToast('Error al conectar con Google Sheets.', 'error');
     } finally {
       setIsSyncing(false);
     }
@@ -287,12 +287,8 @@ export default function App() {
 
   // POI Save Handler (Create / Edit) with zero data loss guarantee
   const handleSavePOI = async (poi: POI, isEdit: boolean) => {
-    const res = await savePOIToAirtable(poi, isEdit);
-    const updatedPoi = {
-      ...poi,
-      id: res.id || poi.id,
-      airtableRecordId: res.airtableRecordId || poi.airtableRecordId,
-    };
+    const res = await savePOIToSheet(poi, isEdit);
+    const updatedPoi = { ...poi, id: res.id || poi.id };
     setPendingCount(getPendingSyncCount());
 
     if (isEdit) {
@@ -303,7 +299,7 @@ export default function App() {
       if (res.isOffline) {
         showToast(`"${updatedPoi.nombre}" guardado en el dispositivo. Pendiente de sincronizar.`, 'info');
       } else {
-        showToast(`"${updatedPoi.nombre}" guardado y sincronizado con Airtable.`, 'success');
+        showToast(`"${updatedPoi.nombre}" guardado y sincronizado con Google Sheets.`, 'success');
       }
     } else {
       setPois((prev) => [updatedPoi, ...prev.filter((p) => p.id !== updatedPoi.id)]);
@@ -311,7 +307,7 @@ export default function App() {
       if (res.isOffline) {
         showToast(`"${updatedPoi.nombre}" creado y guardado en tu dispositivo.`, 'info');
       } else {
-        showToast(`"${updatedPoi.nombre}" guardado y sincronizado con Airtable.`, 'success');
+        showToast(`"${updatedPoi.nombre}" guardado y sincronizado con Google Sheets.`, 'success');
       }
     }
   };
@@ -321,7 +317,7 @@ export default function App() {
     if (!deletingPoi) return;
     setIsDeleting(true);
     try {
-      await deletePOIFromAirtable(deletingPoi.id);
+      await deletePOIFromSheet(deletingPoi.id);
       setPendingCount(getPendingSyncCount());
       setPois((prev) => prev.filter((p) => p.id !== deletingPoi.id));
       if (detailModalPoi?.id === deletingPoi.id) {
@@ -350,7 +346,7 @@ export default function App() {
     if (detailModalPoi?.id === poi.id) {
       setDetailModalPoi(updated);
     }
-    await savePOIToAirtable(updated, true);
+    await savePOIToSheet(updated, true);
     setPendingCount(getPendingSyncCount());
     showToast(
       newFav ? `Añadido a favoritos: ${poi.nombre}` : `Eliminado de favoritos: ${poi.nombre}`,
@@ -402,7 +398,7 @@ export default function App() {
           if (p.categoria === oldKey) {
             const updatedPoi = { ...p, categoria: newKey };
             // Save updated POI to backend in background
-            savePOIToAirtable(updatedPoi, true).catch(() => {});
+            savePOIToSheet(updatedPoi, true).catch(() => {});
             return updatedPoi;
           }
           return p;
@@ -429,7 +425,7 @@ export default function App() {
       prev.map((p) => {
         if (p.categoria === key) {
           const updatedPoi = { ...p, categoria: targetKey };
-          savePOIToAirtable(updatedPoi, true).catch(() => {});
+          savePOIToSheet(updatedPoi, true).catch(() => {});
           return updatedPoi;
         }
         return p;
